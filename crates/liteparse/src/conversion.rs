@@ -43,7 +43,10 @@ pub fn is_supported_extension(path: &str) -> bool {
 ///
 /// Currently stubbed out — returns an error directing users to install
 /// LibreOffice (for office documents) or ImageMagick (for images).
-pub fn convert_to_pdf(path: &str, _password: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+pub fn convert_to_pdf(
+    path: &str,
+    _password: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())

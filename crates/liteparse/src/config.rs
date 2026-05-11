@@ -89,7 +89,10 @@ mod tests {
 
     #[test]
     fn test_parse_target_pages() {
-        assert_eq!(parse_target_pages("1-5,10,15-20").unwrap(), vec![1, 2, 3, 4, 5, 10, 15, 16, 17, 18, 19, 20]);
+        assert_eq!(
+            parse_target_pages("1-5,10,15-20").unwrap(),
+            vec![1, 2, 3, 4, 5, 10, 15, 16, 17, 18, 19, 20]
+        );
         assert_eq!(parse_target_pages("3").unwrap(), vec![3]);
         assert_eq!(parse_target_pages("1,1,2").unwrap(), vec![1, 2]);
         assert!(parse_target_pages("5-3").is_err());

@@ -6,7 +6,11 @@ use liteparse_rs::parser::LiteParse;
 use liteparse_rs::render;
 
 #[derive(Parser, Debug)]
-#[command(name = "lit", version, about = "OSS document parsing tool (supports PDF, DOCX, XLSX, images, and more)")]
+#[command(
+    name = "lit",
+    version,
+    about = "OSS document parsing tool (supports PDF, DOCX, XLSX, images, and more)"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -234,7 +238,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 render::screenshot(&cmd.file, page_number, cmd.dpi, &output_path)?;
 
                 if !cmd.quiet {
-                    eprintln!("[liteparse] screenshot page {} → {}", page_number, output_path);
+                    eprintln!(
+                        "[liteparse] screenshot page {} → {}",
+                        page_number, output_path
+                    );
                 }
             }
         }
@@ -243,7 +250,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let format = parse_output_format(&cmd.format)?;
             let ext_filter = cmd.extension.as_ref().map(|e| {
                 let e = e.to_lowercase();
-                if e.starts_with('.') { e } else { format!(".{}", e) }
+                if e.starts_with('.') {
+                    e
+                } else {
+                    format!(".{}", e)
+                }
             });
 
             let config = LiteParseConfig {
@@ -260,7 +271,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let lp = LiteParse::new(config);
-            let out_ext = if format == OutputFormat::Json { "json" } else { "txt" };
+            let out_ext = if format == OutputFormat::Json {
+                "json"
+            } else {
+                "txt"
+            };
 
             std::fs::create_dir_all(&cmd.output_dir)?;
 
@@ -282,9 +297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let t0 = std::time::Instant::now();
 
                 // Build output path: mirror directory structure
-                let rel = file_path
-                    .strip_prefix(&cmd.input_dir)
-                    .unwrap_or(file_path);
+                let rel = file_path.strip_prefix(&cmd.input_dir).unwrap_or(file_path);
                 let out_path = std::path::Path::new(&cmd.output_dir)
                     .join(rel)
                     .with_extension(out_ext);

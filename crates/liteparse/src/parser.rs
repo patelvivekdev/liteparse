@@ -1,4 +1,4 @@
-use crate::config::{parse_target_pages, LiteParseConfig, OutputFormat};
+use crate::config::{LiteParseConfig, OutputFormat, parse_target_pages};
 use crate::conversion;
 use crate::extract;
 use crate::ocr::tesseract::TesseractOcrEngine;
