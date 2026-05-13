@@ -2220,14 +2220,20 @@ export async function projectPagesToGrid(
     }
 
     // Build result page
-    results.push({
+    const resultPage: ParsedPage = {
       pageNum: page.pageNum,
       width: page.width,
       height: page.height,
       text,
       textItems: page.textItems,
       boundingBoxes: [],
-    });
+    };
+    // Only set ocrApplied when truthy so existing snapshot-style
+    // tests that don't expect this field still pass.
+    if ((page as PageData & { ocrApplied?: boolean }).ocrApplied === true) {
+      resultPage.ocrApplied = true;
+    }
+    results.push(resultPage);
   }
 
   // Clean raw text (margin detection, etc)

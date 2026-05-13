@@ -1,3 +1,5 @@
+import fs from "fs/promises";
+import path from "path";
 import pLimit from "p-limit";
 import {
   LiteParseConfig,
@@ -16,6 +18,7 @@ import { HttpOcrEngine } from "../engines/ocr/http-simple.js";
 import { projectPagesToGrid } from "../processing/grid.js";
 import { buildBoundingBoxes } from "../processing/bbox.js";
 import { formatJSON } from "../output/json.js";
+import { generateSearchablePdf } from "../output/searchablePdf.js";
 import {
   convertToPdf,
   convertBufferToPdf,
@@ -105,6 +108,10 @@ export class LiteParse {
     let doc: PdfDocument;
     let needsCleanup = false;
     let cleanupPath: string | undefined;
+    // Captured before loadDocument because pdf.js transfers (and thus
+    // detaches) the input ArrayBuffer to its worker, leaving doc.data
+    // unusable for downstream pdf-lib parsing.
+    let originalPdfBytes: Uint8Array | undefined;
 
     if (typeof input === "string") {
       log(`Processing file: ${input}`);
@@ -126,6 +133,9 @@ export class LiteParse {
         log(`Converted ${conversionResult.originalExtension} to PDF`);
       }
 
+      if (this.config.searchablePdfOutput) {
+        originalPdfBytes = new Uint8Array(await fs.readFile(pdfPath));
+      }
       doc = await this.pdfEngine.loadDocument(pdfPath, this.config.password);
     } else {
       log(`Processing buffer input (${input.byteLength} bytes)`);
@@ -134,6 +144,9 @@ export class LiteParse {
       if (ext === ".pdf") {
         // Zero-disk path: pass bytes directly to the PDF engine
         const data = input instanceof Uint8Array ? input : new Uint8Array(input);
+        if (this.config.searchablePdfOutput) {
+          originalPdfBytes = new Uint8Array(data);
+        }
         doc = await this.pdfEngine.loadDocument(data, this.config.password);
       } else {
         // Non-PDF buffer: write to temp file for conversion
@@ -151,6 +164,9 @@ export class LiteParse {
         needsCleanup = true;
         cleanupPath = conversionResult.pdfPath;
         log(`Converted ${conversionResult.originalExtension} buffer to PDF`);
+        if (this.config.searchablePdfOutput) {
+          originalPdfBytes = new Uint8Array(await fs.readFile(conversionResult.pdfPath));
+        }
         doc = await this.pdfEngine.loadDocument(conversionResult.pdfPath, this.config.password);
       }
     }
@@ -197,6 +213,29 @@ export class LiteParse {
         case "text":
           // Already in text format
           break;
+      }
+
+      // Generate searchable PDF if requested. We pipe the *original*
+      // PDF bytes back through pdf-lib and overlay invisible text on
+      // OCR'd pages only, so non-OCR pages are byte-identical and
+      // already-searchable PDFs round-trip cleanly.
+      if (this.config.searchablePdfOutput) {
+        try {
+          if (!originalPdfBytes) {
+            throw new Error("Original PDF bytes were not captured");
+          }
+          const searchableBytes = await generateSearchablePdf({
+            pdfBytes: originalPdfBytes,
+            pages: processedPages,
+          });
+          result.searchablePdf = searchableBytes;
+          const outPath = this.config.searchablePdfOutput;
+          await fs.mkdir(path.dirname(path.resolve(outPath)), { recursive: true });
+          await fs.writeFile(outPath, searchableBytes);
+          log(`Wrote searchable PDF → ${outPath}`);
+        } catch (err) {
+          log(`Failed to generate searchable PDF: ${err}`);
+        }
       }
 
       return result;
@@ -373,6 +412,10 @@ export class LiteParse {
     if (!needsFullOcr && !hasGarbledRegions) {
       return;
     }
+
+    // Mark this page so downstream consumers (e.g. the searchable
+    // PDF writer) know an OCR pass was attempted on it.
+    (page as PageData & { ocrApplied?: boolean }).ocrApplied = true;
 
     try {
       // Render page as image buffer

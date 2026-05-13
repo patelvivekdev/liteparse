@@ -140,6 +140,19 @@ export interface LiteParseConfig {
   password?: string;
 
   /**
+   * If set, after parsing LiteParse will write a "searchable PDF" to this
+   * path. Pages where OCR was applied receive an invisible text layer
+   * overlay (so the text can be selected / indexed). Pages with native
+   * PDF text are passed through untouched.
+   *
+   * Only used by {@link LiteParse.parse}. Requires the input to be a PDF
+   * (or convertible to PDF).
+   *
+   * @example `"./out.searchable.pdf"`
+   */
+  searchablePdfOutput?: string;
+
+  /**
    * Debug configuration for grid projection. When enabled, logs detailed
    * information about how text elements are snapped, anchored, and projected.
    * Can also generate visual PNG overlays of the projection.
@@ -304,6 +317,12 @@ export interface ParsedPage {
   /** Individual text elements extracted from the page. */
   textItems: TextItem[];
   /**
+   * `true` if OCR was run on this page (text-sparse, has images, or
+   * had garbled regions). Used by the searchable-PDF generator to
+   * decide which pages need an invisible text overlay.
+   */
+  ocrApplied?: boolean;
+  /**
    * @deprecated Use {@link TextItem} coordinates instead. Will be removed in v2.0.
    * Present when {@link LiteParseConfig.preciseBoundingBox} is enabled.
    */
@@ -380,6 +399,15 @@ export interface ParseResult {
   text: string;
   /** Structured JSON data. Present when {@link LiteParseConfig.outputFormat} is `"json"`. */
   json?: ParseResultJson;
+  /**
+   * Bytes of the generated searchable PDF. Present only when
+   * {@link LiteParseConfig.searchablePdfOutput} is set or when
+   * {@link LiteParse.parseToSearchablePdf} is called.
+   *
+   * Pages that were OCR'd carry an invisible text layer; pages with
+   * native text are included unchanged.
+   */
+  searchablePdf?: Uint8Array;
 }
 
 /**

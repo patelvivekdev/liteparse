@@ -14,6 +14,10 @@
  */
 export { LiteParse } from "./core/parser.js";
 export { searchItems } from "./processing/searchItems.js";
+export {
+  generateSearchablePdf,
+  type GenerateSearchablePdfOptions,
+} from "./output/searchablePdf.js";
 export type {
   LiteParseConfig,
   LiteParseInput,

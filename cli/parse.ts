@@ -30,6 +30,7 @@ interface ParseCommandOptions {
   password?: string;
   config?: string;
   quiet?: boolean;
+  searchablePdf?: string;
   debug?: boolean;
   debugTrace?: boolean;
   debugVisualize?: boolean;
@@ -90,6 +91,10 @@ program
   .option("--no-precise-bbox", "Disable precise bounding boxes")
   .option("--preserve-small-text", "Preserve very small text")
   .option("--password <password>", "Password for encrypted/protected documents")
+  .option(
+    "--searchable-pdf <file>",
+    "Write a searchable PDF (with invisible OCR text layer over scanned pages) to this path"
+  )
   .option("--config <file>", "Config file (JSON)")
   .option("-q, --quiet", "Suppress progress output")
   .addOption(new Option("--debug", "Enable grid projection debug logging").hideHelp())
@@ -147,6 +152,7 @@ program
         preciseBoundingBox: options.preciseBbox !== false,
         preserveVerySmallText: options.preserveSmallText || false,
         password: options.password,
+        searchablePdfOutput: options.searchablePdf,
       };
 
       // Build debug config if any debug flags are set
