@@ -1,5 +1,5 @@
-use clap::{Args, Parser, Subcommand};
-use liteparse::config::{LiteParseConfig, OutputFormat};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use liteparse::config::{LiteParseConfig, OcrTextMode, OutputFormat};
 use liteparse::conversion;
 use liteparse::extract;
 use liteparse::output::{json, text};
@@ -57,6 +57,10 @@ struct ParseCommand {
     /// HTTP OCR server URL (uses Tesseract if not provided)
     #[arg(long, default_value = None)]
     ocr_server_url: Option<String>,
+
+    /// How to combine native text and OCR text on pages where OCR runs
+    #[arg(long, value_enum, default_value = "merge")]
+    ocr_text_mode: CliOcrTextMode,
 
     /// Path to tessdata directory (overrides TESSDATA_PREFIX env var)
     #[arg(long)]
@@ -141,6 +145,10 @@ struct BatchParseCommand {
     #[arg(long, default_value = None)]
     ocr_server_url: Option<String>,
 
+    /// How to combine native text and OCR text on pages where OCR runs
+    #[arg(long, value_enum, default_value = "merge")]
+    ocr_text_mode: CliOcrTextMode,
+
     /// Path to tessdata directory (overrides TESSDATA_PREFIX env var)
     #[arg(long)]
     tessdata_path: Option<String>,
@@ -193,6 +201,21 @@ fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
     }
 }
 
+#[derive(Clone, Debug, ValueEnum)]
+enum CliOcrTextMode {
+    Merge,
+    OcrOnly,
+}
+
+impl From<CliOcrTextMode> for OcrTextMode {
+    fn from(value: CliOcrTextMode) -> Self {
+        match value {
+            CliOcrTextMode::Merge => OcrTextMode::Merge,
+            CliOcrTextMode::OcrOnly => OcrTextMode::OcrOnly,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -213,6 +236,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 password: cmd.password,
                 quiet: cmd.quiet,
                 ocr_server_url: cmd.ocr_server_url,
+                ocr_text_mode: cmd.ocr_text_mode.into(),
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -295,6 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 password: cmd.password,
                 quiet: cmd.quiet,
                 ocr_server_url: cmd.ocr_server_url,
+                ocr_text_mode: cmd.ocr_text_mode.into(),
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {

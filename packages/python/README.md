@@ -33,6 +33,7 @@ parser = LiteParse(
     ocr_enabled=True,              # Enable OCR (default: True)
     ocr_language="eng",            # Tesseract language code
     ocr_server_url=None,           # HTTP OCR server URL (optional)
+    ocr_text_mode="merge",         # "merge" or "ocr-only" for OCR'd pages
     tessdata_path=None,            # Path to tessdata directory (optional)
     max_pages=1000,                # Max pages to parse
     target_pages="1-5,10",         # Specific pages (optional)

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-use liteparse::config::{LiteParseConfig, OutputFormat};
+use liteparse::config::{LiteParseConfig, OcrTextMode, OutputFormat};
 use liteparse::ocr::{OcrEngine, OcrOptions, OcrResult};
 use liteparse::parser::LiteParse as CoreLiteParse;
 use liteparse::search;
@@ -40,6 +40,7 @@ struct JsLiteParseConfig {
     ocr_language: Option<String>,
     ocr_enabled: Option<bool>,
     ocr_server_url: Option<String>,
+    ocr_text_mode: Option<String>,
     tessdata_path: Option<String>,
     max_pages: Option<usize>,
     target_pages: Option<String>,
@@ -61,6 +62,18 @@ impl JsLiteParseConfig {
         }
         if self.ocr_server_url.is_some() {
             cfg.ocr_server_url = self.ocr_server_url;
+        }
+        if let Some(v) = self.ocr_text_mode {
+            cfg.ocr_text_mode = match v.as_str() {
+                "merge" => OcrTextMode::Merge,
+                "ocr-only" => OcrTextMode::OcrOnly,
+                other => {
+                    return Err(JsError::new(&format!(
+                        "invalid ocrTextMode: {} (expected 'merge' or 'ocr-only')",
+                        other
+                    )));
+                }
+            };
         }
         if self.tessdata_path.is_some() {
             cfg.tessdata_path = self.tessdata_path;
@@ -104,6 +117,10 @@ impl JsLiteParseConfig {
             ocr_language: Some(cfg.ocr_language.clone()),
             ocr_enabled: Some(cfg.ocr_enabled),
             ocr_server_url: cfg.ocr_server_url.clone(),
+            ocr_text_mode: Some(match cfg.ocr_text_mode {
+                OcrTextMode::Merge => "merge".into(),
+                OcrTextMode::OcrOnly => "ocr-only".into(),
+            }),
             tessdata_path: cfg.tessdata_path.clone(),
             max_pages: Some(cfg.max_pages),
             target_pages: cfg.target_pages.clone(),

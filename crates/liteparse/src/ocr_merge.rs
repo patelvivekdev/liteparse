@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::config::OcrTextMode;
 use crate::error::LiteParseError;
 use crate::ocr::{OcrEngine, OcrOptions, OcrResult};
 use crate::types::{Page, TextItem};
@@ -75,6 +76,7 @@ pub(crate) async fn ocr_and_merge_rendered(
     dpi: f32,
     ocr_engine: Arc<dyn OcrEngine>,
     ocr_language: &str,
+    ocr_text_mode: OcrTextMode,
     num_workers: usize,
 ) -> Result<(), LiteParseError> {
     // Phase 1: spawn OCR tasks onto the tokio runtime so they run on
@@ -127,40 +129,66 @@ pub(crate) async fn ocr_and_merge_rendered(
         }
 
         let page = &mut pages[idx];
-        for r in &ocr_results {
-            if r.confidence <= 0.1 {
-                continue;
-            }
+        let ocr_text_items = ocr_results_to_text_items(
+            &ocr_results,
+            scale_factor,
+            match ocr_text_mode {
+                OcrTextMode::Merge => Some(&page.text_items),
+                OcrTextMode::OcrOnly => None,
+            },
+        );
 
-            let ocr_x = r.bbox[0] * scale_factor;
-            let ocr_y = r.bbox[1] * scale_factor;
-            let ocr_w = (r.bbox[2] - r.bbox[0]) * scale_factor;
-            let ocr_h = (r.bbox[3] - r.bbox[1]) * scale_factor;
-
-            if overlaps_existing_text(&page.text_items, ocr_x, ocr_y, ocr_w, ocr_h, 2.0) {
-                continue;
-            }
-
-            let cleaned = clean_ocr_table_artifacts(&r.text);
-            if cleaned.is_empty() {
-                continue;
-            }
-
-            page.text_items.push(TextItem {
-                text: cleaned,
-                x: ocr_x,
-                y: ocr_y,
-                width: ocr_w,
-                height: ocr_h,
-                font_name: Some("OCR".to_string()),
-                font_size: Some(ocr_h),
-                confidence: Some((r.confidence * 1000.0).round() / 1000.0),
-                ..Default::default()
-            });
+        match ocr_text_mode {
+            OcrTextMode::Merge => page.text_items.extend(ocr_text_items),
+            OcrTextMode::OcrOnly => page.text_items = ocr_text_items,
         }
     }
 
     Ok(())
+}
+
+fn ocr_results_to_text_items(
+    ocr_results: &[OcrResult],
+    scale_factor: f32,
+    existing_text_items: Option<&[TextItem]>,
+) -> Vec<TextItem> {
+    let mut text_items = Vec::new();
+
+    for r in ocr_results {
+        if r.confidence <= 0.1 {
+            continue;
+        }
+
+        let ocr_x = r.bbox[0] * scale_factor;
+        let ocr_y = r.bbox[1] * scale_factor;
+        let ocr_w = (r.bbox[2] - r.bbox[0]) * scale_factor;
+        let ocr_h = (r.bbox[3] - r.bbox[1]) * scale_factor;
+
+        if let Some(items) = existing_text_items
+            && overlaps_existing_text(items, ocr_x, ocr_y, ocr_w, ocr_h, 2.0)
+        {
+            continue;
+        }
+
+        let cleaned = clean_ocr_table_artifacts(&r.text);
+        if cleaned.is_empty() {
+            continue;
+        }
+
+        text_items.push(TextItem {
+            text: cleaned,
+            x: ocr_x,
+            y: ocr_y,
+            width: ocr_w,
+            height: ocr_h,
+            font_name: Some("OCR".to_string()),
+            font_size: Some(ocr_h),
+            confidence: Some((r.confidence * 1000.0).round() / 1000.0),
+            ..Default::default()
+        });
+    }
+
+    text_items
 }
 
 /// Check if an OCR bounding box overlaps with any existing text item.
@@ -257,6 +285,35 @@ mod tests {
     fn test_overlaps_existing_text_disjoint() {
         let items = vec![make_item(10.0, 10.0, 20.0, 5.0)];
         assert!(!overlaps_existing_text(&items, 100.0, 100.0, 5.0, 5.0, 2.0));
+    }
+
+    #[test]
+    fn test_ocr_results_to_text_items_merge_skips_existing_overlap() {
+        let existing = vec![make_item(10.0, 10.0, 20.0, 5.0)];
+        let results = vec![OcrResult {
+            text: "OCR text".into(),
+            bbox: [10.0, 10.0, 30.0, 15.0],
+            confidence: 0.9,
+        }];
+
+        let items = ocr_results_to_text_items(&results, 1.0, Some(&existing));
+
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_ocr_results_to_text_items_ocr_only_keeps_existing_overlap() {
+        let results = vec![OcrResult {
+            text: "OCR text".into(),
+            bbox: [10.0, 10.0, 30.0, 15.0],
+            confidence: 0.9,
+        }];
+
+        let items = ocr_results_to_text_items(&results, 1.0, None);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "OCR text");
+        assert_eq!(items[0].font_name.as_deref(), Some("OCR"));
     }
 
     #[test]

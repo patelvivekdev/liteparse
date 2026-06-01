@@ -175,6 +175,7 @@ impl LiteParse {
                 self.config.dpi,
                 engine,
                 &self.config.ocr_language,
+                self.config.ocr_text_mode,
                 self.config.num_workers,
             )
             .await?;

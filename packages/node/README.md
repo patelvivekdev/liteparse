@@ -34,6 +34,7 @@ const parser = new LiteParse({
   ocrEnabled: true,              // Enable OCR (default: true)
   ocrLanguage: 'eng',           // Tesseract language code
   ocrServerUrl: undefined,       // HTTP OCR server URL (optional)
+  ocrTextMode: 'merge',          // 'merge' or 'ocr-only' for OCR'd pages
   tessdataPath: undefined,       // Path to tessdata directory (optional)
   maxPages: 1000,                // Max pages to parse
   targetPages: '1-5,10',        // Specific pages (optional)

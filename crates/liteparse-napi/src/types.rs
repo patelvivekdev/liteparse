@@ -1,6 +1,6 @@
 use napi_derive::napi;
 
-use liteparse::config::{LiteParseConfig, OutputFormat};
+use liteparse::config::{LiteParseConfig, OcrTextMode, OutputFormat};
 use liteparse::parser::ParseResult;
 use liteparse::types::{ParsedPage, TextItem};
 
@@ -17,6 +17,8 @@ pub struct JsLiteParseConfig {
     pub ocr_enabled: Option<bool>,
     /// HTTP OCR server URL. If set, uses HTTP OCR instead of Tesseract.
     pub ocr_server_url: Option<String>,
+    /// How OCR text is combined with native text: "merge" or "ocr-only".
+    pub ocr_text_mode: Option<String>,
     /// Path to tessdata directory for Tesseract.
     pub tessdata_path: Option<String>,
     /// Maximum number of pages to parse.
@@ -48,6 +50,12 @@ impl JsLiteParseConfig {
         }
         if let Some(v) = self.ocr_server_url {
             cfg.ocr_server_url = Some(v);
+        }
+        if let Some(v) = self.ocr_text_mode {
+            cfg.ocr_text_mode = match v.as_str() {
+                "ocr-only" => OcrTextMode::OcrOnly,
+                _ => OcrTextMode::Merge,
+            };
         }
         if let Some(v) = self.tessdata_path {
             cfg.tessdata_path = Some(v);
@@ -87,6 +95,10 @@ impl JsLiteParseConfig {
             ocr_language: Some(cfg.ocr_language.clone()),
             ocr_enabled: Some(cfg.ocr_enabled),
             ocr_server_url: cfg.ocr_server_url.clone(),
+            ocr_text_mode: Some(match cfg.ocr_text_mode {
+                OcrTextMode::Merge => "merge".to_string(),
+                OcrTextMode::OcrOnly => "ocr-only".to_string(),
+            }),
             tessdata_path: cfg.tessdata_path.clone(),
             max_pages: Some(cfg.max_pages as u32),
             target_pages: cfg.target_pages.clone(),

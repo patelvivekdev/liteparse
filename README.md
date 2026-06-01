@@ -152,6 +152,9 @@ lit parse document.pdf --target-pages "1-5,10,15-20"
 # Parse without OCR
 lit parse document.pdf --no-ocr
 
+# Use OCR text as the source of truth on pages where OCR runs
+lit parse document.pdf --ocr-text-mode ocr-only
+
 # Parse a remote PDF
 curl -sL https://example.com/report.pdf | lit parse -
 ```

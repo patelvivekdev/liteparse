@@ -1,5 +1,5 @@
-use clap::{Args, Parser, Subcommand};
-use liteparse::config::{LiteParseConfig, OutputFormat};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use liteparse::config::{LiteParseConfig, OcrTextMode, OutputFormat};
 use liteparse::conversion;
 use liteparse::output::{json, text};
 use liteparse::parser::LiteParse;
@@ -38,6 +38,8 @@ struct ParseCommand {
     ocr_language: String,
     #[arg(long, default_value = None)]
     ocr_server_url: Option<String>,
+    #[arg(long, value_enum, default_value = "merge")]
+    ocr_text_mode: CliOcrTextMode,
     #[arg(long)]
     tessdata_path: Option<String>,
     #[arg(long, default_value = "1000")]
@@ -83,6 +85,8 @@ struct BatchParseCommand {
     ocr_language: String,
     #[arg(long, default_value = None)]
     ocr_server_url: Option<String>,
+    #[arg(long, value_enum, default_value = "merge")]
+    ocr_text_mode: CliOcrTextMode,
     #[arg(long)]
     tessdata_path: Option<String>,
     #[arg(long, default_value = "1000")]
@@ -109,6 +113,21 @@ fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
     }
 }
 
+#[derive(Clone, Debug, ValueEnum)]
+enum CliOcrTextMode {
+    Merge,
+    OcrOnly,
+}
+
+impl From<CliOcrTextMode> for OcrTextMode {
+    fn from(value: CliOcrTextMode) -> Self {
+        match value {
+            CliOcrTextMode::Merge => OcrTextMode::Merge,
+            CliOcrTextMode::OcrOnly => OcrTextMode::OcrOnly,
+        }
+    }
+}
+
 /// Run the CLI with the given args (typically from sys.argv).
 pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse_from(args);
@@ -129,6 +148,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 password: cmd.password,
                 quiet: cmd.quiet,
                 ocr_server_url: cmd.ocr_server_url,
+                ocr_text_mode: cmd.ocr_text_mode.into(),
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {
@@ -206,6 +226,7 @@ pub fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 password: cmd.password,
                 quiet: cmd.quiet,
                 ocr_server_url: cmd.ocr_server_url,
+                ocr_text_mode: cmd.ocr_text_mode.into(),
                 ..Default::default()
             };
             if let Some(n) = cmd.num_workers {

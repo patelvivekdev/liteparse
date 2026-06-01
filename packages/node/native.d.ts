@@ -10,6 +10,8 @@ export interface JsLiteParseConfig {
   ocrEnabled?: boolean
   /** HTTP OCR server URL. If set, uses HTTP OCR instead of Tesseract. */
   ocrServerUrl?: string
+  /** How OCR text is combined with native text: "merge" or "ocr-only". */
+  ocrTextMode?: string
   /** Path to tessdata directory for Tesseract. */
   tessdataPath?: string
   /** Maximum number of pages to parse. */

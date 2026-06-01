@@ -5,7 +5,7 @@
 //!
 
 // ── Public API re-exports ──────────────────────────────────────────────
-pub use config::{LiteParseConfig, OutputFormat};
+pub use config::{LiteParseConfig, OcrTextMode, OutputFormat};
 pub use error::LiteParseError;
 pub use parser::{LiteParse, ParseResult, ScreenshotResult};
 pub use search::{SearchOptions, search_items};

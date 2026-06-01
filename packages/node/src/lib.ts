@@ -13,11 +13,13 @@ import {
 
 export type LiteParseInput = string | Buffer | Uint8Array;
 export type OutputFormat = "json" | "text";
+export type OcrTextMode = "merge" | "ocr-only";
 
 export interface LiteParseConfig {
   ocrLanguage: string;
   ocrEnabled: boolean;
   ocrServerUrl?: string;
+  ocrTextMode: OcrTextMode;
   tessdataPath?: string;
   maxPages: number;
   targetPages?: string;
@@ -73,6 +75,7 @@ export class LiteParse {
       ocrLanguage: userConfig.ocrLanguage,
       ocrEnabled: userConfig.ocrEnabled,
       ocrServerUrl: userConfig.ocrServerUrl,
+      ocrTextMode: userConfig.ocrTextMode,
       tessdataPath: userConfig.tessdataPath,
       maxPages: userConfig.maxPages,
       targetPages: userConfig.targetPages,
@@ -92,6 +95,7 @@ export class LiteParse {
       ocrLanguage: resolved.ocrLanguage ?? "eng",
       ocrEnabled: resolved.ocrEnabled ?? true,
       ocrServerUrl: resolved.ocrServerUrl ?? undefined,
+      ocrTextMode: resolved.ocrTextMode ?? "merge",
       tessdataPath: resolved.tessdataPath ?? undefined,
       maxPages: resolved.maxPages ?? 1000,
       targetPages: resolved.targetPages ?? undefined,

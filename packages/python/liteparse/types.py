@@ -62,6 +62,7 @@ class LiteParseConfig:
     ocr_language: str
     ocr_enabled: bool
     ocr_server_url: Optional[str]
+    ocr_text_mode: str
     tessdata_path: Optional[str]
     max_pages: int
     target_pages: Optional[str]

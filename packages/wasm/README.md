@@ -39,6 +39,7 @@ All optional, camelCase:
 |---|---|---|---|
 | `ocrLanguage` | `string` | `"eng"` | Language code passed to the OCR engine |
 | `ocrEnabled` | `boolean` | `true` | Run OCR on text-sparse pages |
+| `ocrTextMode` | `"merge" \| "ocr-only"` | `"merge"` | How to combine native and OCR text on pages where OCR runs |
 | `maxPages` | `number` | `1000` | Stop after this many pages |
 | `targetPages` | `string` | — | e.g. `"1-5,10,15-20"` |
 | `dpi` | `number` | `150` | Render DPI for OCR / screenshots |

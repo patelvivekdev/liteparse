@@ -9,6 +9,9 @@ pub struct LiteParseConfig {
     pub ocr_enabled: bool,
     /// HTTP OCR server URL (uses Tesseract if not provided)
     pub ocr_server_url: Option<String>,
+    /// How OCR text is combined with native PDF text on pages where OCR runs.
+    #[serde(default)]
+    pub ocr_text_mode: OcrTextMode,
     /// Path to tessdata directory. Falls back to TESSDATA_PREFIX env var if not set.
     pub tessdata_path: Option<String>,
     /// Maximum number of pages to parse.
@@ -29,6 +32,17 @@ pub struct LiteParseConfig {
     pub num_workers: usize,
 }
 
+/// Controls how OCR text is combined with native PDF text on pages where OCR runs.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OcrTextMode {
+    /// Keep native PDF text and add OCR text that does not overlap it.
+    #[default]
+    Merge,
+    /// Replace native PDF text with OCR text on pages where OCR runs.
+    OcrOnly,
+}
+
 /// Supported output formats.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -43,6 +57,7 @@ impl Default for LiteParseConfig {
             ocr_language: "eng".to_string(),
             ocr_enabled: true,
             ocr_server_url: None,
+            ocr_text_mode: OcrTextMode::Merge,
             tessdata_path: None,
             max_pages: 1000,
             target_pages: None,
@@ -127,6 +142,7 @@ mod tests {
         let c = LiteParseConfig::default();
         assert_eq!(c.ocr_language, "eng");
         assert!(c.ocr_enabled);
+        assert_eq!(c.ocr_text_mode, OcrTextMode::Merge);
         assert_eq!(c.max_pages, 1000);
         assert_eq!(c.dpi, 150.0);
         assert_eq!(c.output_format, OutputFormat::Json);
@@ -149,6 +165,15 @@ mod tests {
         let s = serde_json::to_string(&c).unwrap();
         let back: LiteParseConfig = serde_json::from_str(&s).unwrap();
         assert_eq!(back.ocr_language, c.ocr_language);
+        assert_eq!(back.ocr_text_mode, c.ocr_text_mode);
         assert_eq!(back.output_format, c.output_format);
+    }
+
+    #[test]
+    fn test_ocr_text_mode_kebab_case_serde() {
+        let s = serde_json::to_string(&OcrTextMode::OcrOnly).unwrap();
+        assert_eq!(s, "\"ocr-only\"");
+        let back: OcrTextMode = serde_json::from_str("\"merge\"").unwrap();
+        assert_eq!(back, OcrTextMode::Merge);
     }
 }
