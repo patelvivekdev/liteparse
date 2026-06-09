@@ -237,6 +237,7 @@ impl PyLiteParseConfig {
             ocr_text_mode: match cfg.ocr_text_mode {
                 OcrTextMode::Merge => "merge".to_string(),
                 OcrTextMode::OcrOnly => "ocr-only".to_string(),
+                OcrTextMode::Auto => "auto".to_string(),
             },
             tessdata_path: cfg.tessdata_path.clone(),
             max_pages: cfg.max_pages,
@@ -312,6 +313,7 @@ impl LiteParse {
         if let Some(v) = ocr_text_mode {
             cfg.ocr_text_mode = match v.as_str() {
                 "ocr-only" => OcrTextMode::OcrOnly,
+                "auto" => OcrTextMode::Auto,
                 _ => OcrTextMode::Merge,
             };
         }

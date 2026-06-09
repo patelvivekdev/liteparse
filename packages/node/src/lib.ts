@@ -13,7 +13,7 @@ import {
 
 export type LiteParseInput = string | Buffer | Uint8Array;
 export type OutputFormat = "json" | "text";
-export type OcrTextMode = "merge" | "ocr-only";
+export type OcrTextMode = "merge" | "ocr-only" | "auto";
 
 export interface LiteParseConfig {
   ocrLanguage: string;

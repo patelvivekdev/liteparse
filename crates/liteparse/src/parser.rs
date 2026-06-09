@@ -112,7 +112,12 @@ impl LiteParse {
                 t_extract.duration_since(t0).as_secs_f64() * 1000.0,
                 pages.len()
             ));
-            let rendered = ocr_merge::render_pages_for_ocr(&document, &pages, self.config.dpi)?;
+            let rendered = ocr_merge::render_pages_for_ocr(
+                &document,
+                &pages,
+                self.config.dpi,
+                self.config.ocr_text_mode,
+            )?;
             log(&format!(
                 "[liteparse] ocr render: {:.1}ms ({} pages)",
                 web_time::Instant::now()

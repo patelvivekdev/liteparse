@@ -85,7 +85,9 @@ class LiteParse:
             ocr_enabled: Whether to enable OCR for scanned documents (default: True)
             ocr_server_url: URL of HTTP OCR server (uses Tesseract if not provided)
             ocr_language: Language code for OCR (e.g., "eng", "fra")
-            ocr_text_mode: How to combine OCR and native text: "merge" or "ocr-only"
+            ocr_text_mode: How to combine OCR and native text: "merge", "ocr-only",
+                or "auto" (keep good native text, let OCR win only where the native
+                layer is corrupt)
             tessdata_path: Path to tessdata directory for Tesseract
             max_pages: Maximum number of pages to parse
             target_pages: Specific pages to parse (e.g., "1-5,10,15-20")

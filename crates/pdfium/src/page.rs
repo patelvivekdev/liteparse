@@ -154,6 +154,12 @@ impl Page<'_> {
     pub fn image_bounds(&self, min_size_pt: f32, max_page_coverage: f32) -> Vec<ImageBounds> {
         let page_width = self.width();
         let page_height = self.height();
+        let view_box = self.view_box().unwrap_or(RectF {
+            left: 0.0,
+            top: page_height,
+            right: page_width,
+            bottom: 0.0,
+        });
         let obj_count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
         let mut results = Vec::new();
 
@@ -185,8 +191,15 @@ impl Page<'_> {
                 continue;
             }
 
-            let w = right - left;
-            let h = top - bottom;
+            let page_bounds = RectF {
+                left,
+                top,
+                right,
+                bottom,
+            };
+            let viewport_bounds = self.bounds_to_viewport(&view_box, &page_bounds);
+            let w = viewport_bounds.right - viewport_bounds.left;
+            let h = viewport_bounds.bottom - viewport_bounds.top;
 
             if w < min_size_pt || h < min_size_pt {
                 continue;
@@ -195,10 +208,9 @@ impl Page<'_> {
                 continue;
             }
 
-            // Convert from PDF coords (bottom-left origin) to viewport (top-left origin)
             results.push(ImageBounds {
-                x: left,
-                y: page_height - top,
+                x: viewport_bounds.left,
+                y: viewport_bounds.top,
                 width: w,
                 height: h,
             });

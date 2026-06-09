@@ -23,7 +23,7 @@ export interface LiteParseNativeConfig {
   ocrLanguage?: string;
   ocrEnabled?: boolean;
   ocrServerUrl?: string;
-  ocrTextMode?: "merge" | "ocr-only";
+  ocrTextMode?: "merge" | "ocr-only" | "auto";
   tessdataPath?: string;
   maxPages?: number;
   targetPages?: string;

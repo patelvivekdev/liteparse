@@ -54,6 +54,7 @@ impl JsLiteParseConfig {
         if let Some(v) = self.ocr_text_mode {
             cfg.ocr_text_mode = match v.as_str() {
                 "ocr-only" => OcrTextMode::OcrOnly,
+                "auto" => OcrTextMode::Auto,
                 _ => OcrTextMode::Merge,
             };
         }
@@ -98,6 +99,7 @@ impl JsLiteParseConfig {
             ocr_text_mode: Some(match cfg.ocr_text_mode {
                 OcrTextMode::Merge => "merge".to_string(),
                 OcrTextMode::OcrOnly => "ocr-only".to_string(),
+                OcrTextMode::Auto => "auto".to_string(),
             }),
             tessdata_path: cfg.tessdata_path.clone(),
             max_pages: Some(cfg.max_pages as u32),

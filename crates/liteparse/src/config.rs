@@ -41,6 +41,10 @@ pub enum OcrTextMode {
     Merge,
     /// Replace native PDF text with OCR text on pages where OCR runs.
     OcrOnly,
+    /// Per-region arbitration: keep trustworthy native text, but where the native
+    /// run is corrupt (broken ToUnicode / buggy font encoding) let the overlapping
+    /// OCR win, and still add OCR over image/signature gaps. Same cost as `Merge`.
+    Auto,
 }
 
 /// Supported output formats.

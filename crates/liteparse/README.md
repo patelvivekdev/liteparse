@@ -51,7 +51,7 @@ let config = LiteParseConfig {
     ocr_enabled: true,                    // Enable OCR (default: true)
     ocr_language: "eng".to_string(),      // Tesseract language code
     ocr_server_url: None,                 // HTTP OCR server URL (optional)
-    ocr_text_mode: OcrTextMode::Merge,    // Or OcrTextMode::OcrOnly for OCR'd pages
+    ocr_text_mode: OcrTextMode::Merge,    // Merge | OcrOnly | Auto (heal corrupt native text)
     tessdata_path: None,                  // Path to tessdata directory (optional)
     max_pages: 1000,                      // Max pages to parse
     target_pages: Some("1-5,10".into()),  // Specific pages (optional)

@@ -547,6 +547,7 @@ struct SegmentBuilder {
     font_weight: Option<i32>,
     font_flags: Option<i32>,
     font_is_buggy: bool,
+    has_map_error: bool,
     font_is_embedded: bool,
     font: Option<Font>,
     rotation_deg: f32,
@@ -577,6 +578,7 @@ impl SegmentBuilder {
             font_weight: None,
             font_flags: None,
             font_is_buggy: false,
+            has_map_error: false,
             font_is_embedded: false,
             font: None,
             rotation_deg: 0.0,
@@ -626,6 +628,7 @@ impl SegmentBuilder {
         self.pending_space = false;
         self.text_width = 0.0;
         self.font_is_buggy = false;
+        self.has_map_error = false;
         self.font_is_embedded = false;
         self.font = None;
 
@@ -703,6 +706,13 @@ impl SegmentBuilder {
         if !self.font_is_buggy && self.font_is_embedded && is_buggy_codepoint(unicode) {
             self.font_is_buggy = true;
         }
+
+        // Broken/missing ToUnicode map on the first glyph. Unlike
+        // is_buggy_codepoint this does NOT require an embedded font, and it caught
+        // ~95% of chars on the real garbled doc — the primary corruption signal.
+        if !ch.is_generated() && ch.has_unicode_map_error() {
+            self.has_map_error = true;
+        }
     }
 
     /// Add a visible character to the current segment.
@@ -734,6 +744,11 @@ impl SegmentBuilder {
             if is_buggy_codepoint(unicode) {
                 self.font_is_buggy = true;
             }
+        }
+
+        // Broken/missing ToUnicode map on subsequent chars.
+        if !self.has_map_error && !ch.is_generated() && ch.has_unicode_map_error() {
+            self.has_map_error = true;
         }
     }
 
@@ -800,6 +815,7 @@ impl SegmentBuilder {
                     None
                 },
                 font_is_buggy: self.font_is_buggy,
+                has_map_error: self.has_map_error,
                 mcid: self.mcid,
                 fill_color: self.fill_color.clone(),
                 stroke_color: self.stroke_color.clone(),

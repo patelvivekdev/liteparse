@@ -67,9 +67,10 @@ impl JsLiteParseConfig {
             cfg.ocr_text_mode = match v.as_str() {
                 "merge" => OcrTextMode::Merge,
                 "ocr-only" => OcrTextMode::OcrOnly,
+                "auto" => OcrTextMode::Auto,
                 other => {
                     return Err(JsError::new(&format!(
-                        "invalid ocrTextMode: {} (expected 'merge' or 'ocr-only')",
+                        "invalid ocrTextMode: {} (expected 'merge', 'ocr-only' or 'auto')",
                         other
                     )));
                 }
@@ -120,6 +121,7 @@ impl JsLiteParseConfig {
             ocr_text_mode: Some(match cfg.ocr_text_mode {
                 OcrTextMode::Merge => "merge".into(),
                 OcrTextMode::OcrOnly => "ocr-only".into(),
+                OcrTextMode::Auto => "auto".into(),
             }),
             tessdata_path: cfg.tessdata_path.clone(),
             max_pages: Some(cfg.max_pages),

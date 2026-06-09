@@ -205,6 +205,7 @@ fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
 enum CliOcrTextMode {
     Merge,
     OcrOnly,
+    Auto,
 }
 
 impl From<CliOcrTextMode> for OcrTextMode {
@@ -212,6 +213,7 @@ impl From<CliOcrTextMode> for OcrTextMode {
         match value {
             CliOcrTextMode::Merge => OcrTextMode::Merge,
             CliOcrTextMode::OcrOnly => OcrTextMode::OcrOnly,
+            CliOcrTextMode::Auto => OcrTextMode::Auto,
         }
     }
 }

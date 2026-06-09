@@ -21,7 +21,7 @@ program
   .option("--ocr-language <lang>", "OCR language (default: eng)")
   .option(
     "--ocr-text-mode <mode>",
-    "How to combine native text and OCR text: merge|ocr-only",
+    "How to combine native text and OCR text: merge|ocr-only|auto",
   )
   .option("--max-pages <n>", "Max pages to parse", parseInt)
   .option(
@@ -53,7 +53,7 @@ program
       if (opts.ocr === false) config.ocrEnabled = false;
       if (opts.ocrLanguage) config.ocrLanguage = opts.ocrLanguage as string;
       if (opts.ocrTextMode)
-        config.ocrTextMode = opts.ocrTextMode as "merge" | "ocr-only";
+        config.ocrTextMode = opts.ocrTextMode as "merge" | "ocr-only" | "auto";
       if (opts.maxPages) config.maxPages = opts.maxPages as number;
       if (opts.targetPages) config.targetPages = opts.targetPages as string;
       if (opts.dpi) config.dpi = opts.dpi as number;
@@ -172,7 +172,7 @@ program
   .option("--ocr-server-url <url>", "HTTP OCR server URL")
   .option(
     "--ocr-text-mode <mode>",
-    "How to combine native text and OCR text: merge|ocr-only",
+    "How to combine native text and OCR text: merge|ocr-only|auto",
   )
   .option("--max-pages <n>", "Max pages to parse per file", parseInt)
   .option("--dpi <dpi>", "Rendering DPI", parseFloat)
@@ -196,7 +196,7 @@ program
         if (opts.ocrServerUrl)
           config.ocrServerUrl = opts.ocrServerUrl as string;
         if (opts.ocrTextMode)
-          config.ocrTextMode = opts.ocrTextMode as "merge" | "ocr-only";
+          config.ocrTextMode = opts.ocrTextMode as "merge" | "ocr-only" | "auto";
         if (opts.maxPages) config.maxPages = opts.maxPages as number;
         if (opts.dpi) config.dpi = opts.dpi as number;
         if (opts.password) config.password = opts.password as string;

@@ -23,6 +23,7 @@ pub(crate) fn render_pages_for_ocr(
     document: &Document,
     pages: &[Page],
     dpi: f32,
+    ocr_text_mode: OcrTextMode,
 ) -> Result<Vec<RenderedPage>, LiteParseError> {
     let mut rendered = Vec::new();
     for (idx, page) in pages.iter().enumerate() {
@@ -42,7 +43,15 @@ pub(crate) fn render_pages_for_ocr(
             0.0
         };
 
-        let needs_ocr = text_length < 20 || text_coverage < 0.15 || has_images;
+        // In Auto mode a page can be full of *corrupt* native text (plenty of it,
+        // no image) — sparse/image heuristics miss it, so it would never be OCR'd
+        // and never repaired. Trigger OCR when the native layer is corrupt. Gated
+        // to Auto so Merge/OcrOnly OCR cost is unchanged.
+        let has_corrupt_native = ocr_text_mode == OcrTextMode::Auto
+            && page.text_items.iter().any(native_is_corrupt);
+
+        let needs_ocr =
+            text_length < 20 || text_coverage < 0.15 || has_images || has_corrupt_native;
         if !needs_ocr {
             continue;
         }
@@ -164,14 +173,17 @@ pub(crate) async fn ocr_and_merge_rendered(
             &ocr_results,
             scale_factor,
             match ocr_text_mode {
-                OcrTextMode::Merge => Some(&page.text_items),
-                OcrTextMode::OcrOnly => None,
+                // Merge pre-filters OCR that overlaps ANY native box. Auto does its
+                // own per-region arbitration below, so it must see all OCR lines.
+                OcrTextMode::Merge => Some(page.text_items.as_slice()),
+                OcrTextMode::OcrOnly | OcrTextMode::Auto => None,
             },
         );
 
         match ocr_text_mode {
             OcrTextMode::Merge => page.text_items.extend(ocr_text_items),
             OcrTextMode::OcrOnly => page.text_items = ocr_text_items,
+            OcrTextMode::Auto => arbitrate_auto(&mut page.text_items, ocr_text_items),
         }
     }
 
@@ -267,6 +279,51 @@ fn page_has_sparse_native_text(page: &Page) -> bool {
     };
 
     text_length < 20 || text_coverage < 0.15
+}
+
+/// In `Auto` mode, an OCR box is dropped as a duplicate only when surviving
+/// (clean) native text already covers at least this fraction of its area. Below
+/// the threshold the OCR is kept — it is filling a hole left by removed corrupt
+/// native text, an image/signature gap, or the corrupt part of a mixed line.
+const AUTO_NATIVE_COVERAGE_DROP: f32 = 0.5;
+
+/// True when a native run is untrustworthy: a broken/missing ToUnicode map
+/// (`has_map_error`, the primary signal) or a known-buggy font encoding
+/// (`font_is_buggy`, private-use / TT-subset / Type1 secondary signal).
+fn native_is_corrupt(item: &TextItem) -> bool {
+    item.has_map_error || item.font_is_buggy
+}
+
+/// Fraction of `ocr`'s area covered by the union-ish of `items` boxes (summed
+/// intersection areas, capped at 1.0 — good enough to tell "already covered by
+/// native" from "covers a hole").
+fn covered_fraction(items: &[TextItem], ocr: &TextItem) -> f32 {
+    let ocr_area = (ocr.width * ocr.height).max(f32::EPSILON);
+    let mut covered = 0.0;
+    for it in items {
+        let ix = ocr.x.max(it.x);
+        let iy = ocr.y.max(it.y);
+        let ix2 = (ocr.x + ocr.width).min(it.x + it.width);
+        let iy2 = (ocr.y + ocr.height).min(it.y + it.height);
+        if ix2 > ix && iy2 > iy {
+            covered += (ix2 - ix) * (iy2 - iy);
+        }
+    }
+    (covered / ocr_area).min(1.0)
+}
+
+/// `Auto` text mode arbitration. Keeps trustworthy native text, removes corrupt
+/// native runs (so they can't win over OCR — the merge bug), then adds OCR that
+/// fills the resulting holes and genuine image/signature gaps, while dropping OCR
+/// that merely duplicates surviving clean native. Cost is the same as `Merge`:
+/// OCR has already run; this is pure geometry + a flag read.
+fn arbitrate_auto(native: &mut Vec<TextItem>, ocr_items: Vec<TextItem>) {
+    native.retain(|n| !native_is_corrupt(n));
+    for o in ocr_items {
+        if covered_fraction(native, &o) < AUTO_NATIVE_COVERAGE_DROP {
+            native.push(o);
+        }
+    }
 }
 
 /// Check if an OCR bounding box overlaps with any existing text item.
@@ -392,6 +449,112 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].text, "OCR text");
         assert_eq!(items[0].font_name.as_deref(), Some("OCR"));
+    }
+
+    // ---- Auto mode arbitration ----
+
+    fn native(x: f32, y: f32, w: f32, h: f32, text: &str) -> TextItem {
+        TextItem { text: text.into(), x, y, width: w, height: h, ..Default::default() }
+    }
+    fn corrupt(x: f32, y: f32, w: f32, h: f32, text: &str) -> TextItem {
+        TextItem { has_map_error: true, ..native(x, y, w, h, text) }
+    }
+    fn ocr_item(x: f32, y: f32, w: f32, h: f32, text: &str) -> TextItem {
+        TextItem {
+            text: text.into(), x, y, width: w, height: h,
+            font_name: Some("OCR".into()), confidence: Some(0.9), ..Default::default()
+        }
+    }
+    fn texts(items: &[TextItem]) -> Vec<&str> {
+        items.iter().map(|t| t.text.as_str()).collect()
+    }
+
+    #[test]
+    fn auto_keeps_clean_native_over_overlapping_ocr() {
+        let mut items = vec![native(10.0, 10.0, 100.0, 12.0, "DOCUMENT NUMBER 40128")];
+        arbitrate_auto(&mut items, vec![ocr_item(10.0, 10.0, 100.0, 12.0, "DOCUMENT NUMBER 40128")]);
+        assert_eq!(texts(&items), vec!["DOCUMENT NUMBER 40128"]);
+        assert!(items[0].font_name.is_none(), "should remain the native item");
+    }
+
+    #[test]
+    fn auto_replaces_map_error_native_with_overlapping_ocr() {
+        let mut items = vec![corrupt(10.0, 10.0, 100.0, 12.0, "\u{1}\u{2}\u{3}")];
+        arbitrate_auto(&mut items, vec![ocr_item(10.0, 10.0, 100.0, 12.0, "Line Description")]);
+        assert_eq!(texts(&items), vec!["Line Description"]);
+        assert_eq!(items[0].font_name.as_deref(), Some("OCR"));
+    }
+
+    #[test]
+    fn auto_replaces_buggy_font_native_with_overlapping_ocr() {
+        let mut bad = native(10.0, 10.0, 100.0, 12.0, "garbage");
+        bad.font_is_buggy = true;
+        let mut items = vec![bad];
+        arbitrate_auto(&mut items, vec![ocr_item(10.0, 10.0, 100.0, 12.0, "Real Text")]);
+        assert_eq!(texts(&items), vec!["Real Text"]);
+    }
+
+    #[test]
+    fn auto_adds_non_overlapping_ocr_gap_fill() {
+        let mut items = vec![native(10.0, 10.0, 50.0, 12.0, "header")];
+        arbitrate_auto(&mut items, vec![ocr_item(10.0, 200.0, 80.0, 12.0, "[SIGNATURE]")]);
+        assert_eq!(items.len(), 2);
+        assert!(texts(&items).contains(&"[SIGNATURE]"));
+        assert!(texts(&items).contains(&"header"));
+    }
+
+    #[test]
+    fn auto_does_not_nuke_clean_column_when_other_is_corrupt() {
+        // left column corrupt, right column clean; one OCR line per column
+        let mut items = vec![
+            corrupt(10.0, 10.0, 80.0, 12.0, "\u{1}\u{2}"),
+            native(200.0, 10.0, 80.0, 12.0, "94-2404110"),
+        ];
+        arbitrate_auto(&mut items, vec![
+            ocr_item(10.0, 10.0, 80.0, 12.0, "California"),   // heals left
+            ocr_item(200.0, 10.0, 80.0, 12.0, "94-2404110"),  // duplicates clean right
+        ]);
+        let t = texts(&items);
+        assert!(t.contains(&"California"), "left column healed by OCR");
+        assert!(t.contains(&"94-2404110"), "right clean column preserved");
+        assert_eq!(t.iter().filter(|s| **s == "94-2404110").count(), 1, "right OCR dropped as dup");
+    }
+
+    #[test]
+    fn auto_supplies_ocr_for_corrupt_chunk_on_mixed_line() {
+        // small clean chunk + corrupt chunk on the same line, one OCR line over both
+        let mut items = vec![
+            native(10.0, 10.0, 20.0, 12.0, "No:"),
+            corrupt(35.0, 10.0, 80.0, 12.0, "\u{1}\u{2}\u{3}"),
+        ];
+        arbitrate_auto(&mut items, vec![ocr_item(10.0, 10.0, 105.0, 12.0, "No: 99001")]);
+        let t = texts(&items);
+        assert!(t.contains(&"No:"), "clean chunk kept");
+        assert!(t.contains(&"No: 99001"), "OCR supplies the corrupt region's text");
+        assert!(!t.iter().any(|s| s.contains('\u{1}')), "corrupt chunk removed");
+    }
+
+    #[test]
+    fn auto_whole_corrupt_page_becomes_ocr() {
+        let mut items = vec![
+            corrupt(10.0, 10.0, 100.0, 12.0, "\u{1}"),
+            corrupt(10.0, 30.0, 100.0, 12.0, "\u{2}"),
+        ];
+        arbitrate_auto(&mut items, vec![
+            ocr_item(10.0, 10.0, 100.0, 12.0, "Real Line One"),
+            ocr_item(10.0, 30.0, 100.0, 12.0, "Real Line Two"),
+        ]);
+        assert_eq!(texts(&items), vec!["Real Line One", "Real Line Two"]);
+    }
+
+    #[test]
+    fn auto_leaves_clean_native_untouched_when_no_ocr() {
+        let mut items = vec![
+            native(10.0, 10.0, 50.0, 12.0, "hello"),
+            native(10.0, 30.0, 50.0, 12.0, "world"),
+        ];
+        arbitrate_auto(&mut items, vec![]);
+        assert_eq!(texts(&items), vec!["hello", "world"]);
     }
 
     #[test]

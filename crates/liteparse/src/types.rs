@@ -41,6 +41,12 @@ pub struct TextItem {
     /// Whether the font has buggy encoding (private-use codepoints, TT subset, etc.)
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub font_is_buggy: bool,
+    /// Whether any (non-generated) character in this item had a Unicode map error
+    /// — i.e. a broken/missing ToUnicode map, so the extracted codepoints are
+    /// unreliable. Primary signal that this native run is corrupt and OCR should
+    /// win over it in `Auto` mode.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub has_map_error: bool,
     /// Marked content ID from the PDF structure tree.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mcid: Option<i32>,
