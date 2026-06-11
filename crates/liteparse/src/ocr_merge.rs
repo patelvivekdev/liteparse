@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::error::LiteParseError;
 use crate::ocr::{OcrEngine, OcrOptions, OcrResult};
 use crate::types::{Page, TextItem};
-use pdfium::Document;
+use pdfium::{Document, ImageBounds};
 
 /// Owned page bitmap prepared for OCR. Indices refer to positions in the `pages` slice.
 pub(crate) struct RenderedPage {
@@ -50,8 +50,21 @@ pub(crate) fn render_pages_for_ocr(
             0.0
         };
 
-        let needs_ocr =
-            text_length < 20 || text_coverage < 0.15 || has_images || page_is_garbled(page);
+        // Vector-glyph content: text flattened to filled Bézier outlines
+        // (no character codes) renders fine but is invisible to text
+        // extraction. On a text-dense page none of the other predicates
+        // fire, so such lines were silently dropped (#291 case 2). Count
+        // glyph-like path area that is NOT already covered by native text
+        // items — only unexplained ink should pull the page into OCR.
+        let glyph_bounds = page_obj.glyph_like_path_bounds();
+        let has_vector_text =
+            page_has_unexplained_vector_text(&glyph_bounds, &page.text_items, page_area);
+
+        let needs_ocr = text_length < 20
+            || text_coverage < 0.15
+            || has_images
+            || has_vector_text
+            || page_is_garbled(page);
         if !needs_ocr {
             continue;
         }
@@ -314,6 +327,55 @@ fn page_has_sparse_native_text(page: &Page) -> bool {
     text_length < 20 || text_coverage < 0.15
 }
 
+/// Decide whether glyph-like path boxes represent text content the native
+/// text layer doesn't explain. A box counts as unexplained when less than
+/// half of its area overlaps native text items; the page qualifies when the
+/// summed unexplained area exceeds 0.3% of the page area (one short flattened
+/// body line on a letter page is ~0.8%).
+fn page_has_unexplained_vector_text(
+    glyph_bounds: &[ImageBounds],
+    items: &[TextItem],
+    page_area: f32,
+) -> bool {
+    if page_area <= 0.0 {
+        return false;
+    }
+    let unexplained: f32 = glyph_bounds
+        .iter()
+        .filter(|b| glyph_box_text_overlap_fraction(b.x, b.y, b.width, b.height, items) < 0.5)
+        .map(|b| b.width * b.height)
+        .sum();
+    unexplained / page_area > 0.003
+}
+
+/// Fraction of a glyph-like path box's area already covered by native text
+/// items. Flattened-text boxes sit in whitespace between text items (low
+/// overlap); filled decorative paths *behind* text (highlight bars, button
+/// backgrounds) overlap heavily and should not trigger OCR.
+fn glyph_box_text_overlap_fraction(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    items: &[TextItem],
+) -> f32 {
+    let box_area = w * h;
+    if box_area <= 0.0 {
+        return 1.0;
+    }
+    // Approximate: sum pairwise intersections (text items rarely overlap each
+    // other, so double counting is negligible) and clamp.
+    let mut covered = 0.0f32;
+    for item in items {
+        let ix = (x + w).min(item.x + item.width) - x.max(item.x);
+        let iy = (y + h).min(item.y + item.height) - y.max(item.y);
+        if ix > 0.0 && iy > 0.0 {
+            covered += ix * iy;
+        }
+    }
+    (covered / box_area).min(1.0)
+}
+
 /// Heuristic for substitution-cipher / broken-cmap garbling: real Latin-script
 /// text has a vowel ratio of roughly 30–45%, but a substitution permutation
 /// almost always maps the original A/E/I/O/U onto non-vowel letters, driving
@@ -554,6 +616,81 @@ mod tests {
     #[test]
     fn test_overlaps_empty() {
         assert!(!overlaps_existing_text(&[], 0.0, 0.0, 1.0, 1.0, 0.0));
+    }
+
+    // -- vector-glyph (flattened text) gate, issue #291 case 2 --
+
+    fn glyph_box(x: f32, y: f32, w: f32, h: f32) -> ImageBounds {
+        ImageBounds {
+            x,
+            y,
+            width: w,
+            height: h,
+        }
+    }
+
+    #[test]
+    fn test_glyph_overlap_fraction_disjoint() {
+        let items = vec![make_item(0.0, 0.0, 100.0, 12.0)];
+        // Box on a different line: zero overlap.
+        let f = glyph_box_text_overlap_fraction(0.0, 50.0, 100.0, 10.0, &items);
+        assert_eq!(f, 0.0);
+    }
+
+    #[test]
+    fn test_glyph_overlap_fraction_fully_covered() {
+        // Decorative path sitting entirely behind a text item (highlight bar).
+        let items = vec![make_item(0.0, 0.0, 200.0, 20.0)];
+        let f = glyph_box_text_overlap_fraction(10.0, 5.0, 100.0, 10.0, &items);
+        assert_eq!(f, 1.0);
+    }
+
+    #[test]
+    fn test_glyph_overlap_fraction_half_covered() {
+        // Text item covers the left half of the box.
+        let items = vec![make_item(0.0, 0.0, 50.0, 10.0)];
+        let f = glyph_box_text_overlap_fraction(0.0, 0.0, 100.0, 10.0, &items);
+        assert!((f - 0.5).abs() < 1e-4, "expected ~0.5, got {f}");
+    }
+
+    #[test]
+    fn test_vector_text_gate_fires_for_flattened_line_in_whitespace() {
+        // Letter page, one flattened body line (374x10pt ~ acme repro) in a
+        // gap between native lines.
+        let page_area = 612.0 * 792.0;
+        let items = vec![
+            make_item(72.0, 380.0, 440.0, 12.0),
+            make_item(72.0, 420.0, 440.0, 12.0),
+        ];
+        let bounds = vec![glyph_box(72.0, 400.0, 374.0, 10.0)];
+        assert!(page_has_unexplained_vector_text(&bounds, &items, page_area));
+    }
+
+    #[test]
+    fn test_vector_text_gate_ignores_paths_behind_native_text() {
+        // Same flattened-line-sized box, but fully covered by a native text
+        // item (e.g. a filled background behind real text): must not fire.
+        let page_area = 612.0 * 792.0;
+        let items = vec![make_item(70.0, 398.0, 380.0, 14.0)];
+        let bounds = vec![glyph_box(72.0, 400.0, 374.0, 10.0)];
+        assert!(!page_has_unexplained_vector_text(&bounds, &items, page_area));
+    }
+
+    #[test]
+    fn test_vector_text_gate_ignores_tiny_unexplained_area() {
+        // A single small decorative glyph-like path (icon) far from text:
+        // under the 0.3% area threshold, must not fire.
+        let page_area = 612.0 * 792.0;
+        let bounds = vec![glyph_box(500.0, 700.0, 20.0, 20.0)];
+        assert!(!page_has_unexplained_vector_text(&bounds, &[], page_area));
+    }
+
+    #[test]
+    fn test_vector_text_gate_empty_inputs() {
+        assert!(!page_has_unexplained_vector_text(&[], &[], 612.0 * 792.0));
+        let bounds = vec![glyph_box(0.0, 0.0, 100.0, 10.0)];
+        // Degenerate page area must not divide by zero or fire.
+        assert!(!page_has_unexplained_vector_text(&bounds, &[], 0.0));
     }
 
     #[test]

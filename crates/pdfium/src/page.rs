@@ -215,6 +215,40 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
         results
     }
 
+    /// Extract bounding boxes of path objects that look like vector glyph
+    /// outlines (text flattened to filled Bézier paths, carrying no character
+    /// codes). Such content renders as perfectly readable text but is
+    /// invisible to text extraction, so callers can use these bounds to
+    /// decide whether a page needs OCR despite having a dense text layer.
+    ///
+    /// Heuristic per path object:
+    /// - fill mode is set (glyph outlines are filled; chart lines, table rules
+    ///   and borders are stroked),
+    /// - Bézier-heavy (letterforms are mostly curves; rules/borders are pure
+    ///   move/line segments, rounded rects have only 4 curves),
+    /// - bounds are text-sized (excludes full-page background art).
+    ///
+    /// Form XObjects are recursed into (depth-limited) because flattened text
+    /// is frequently wrapped in one.
+    ///
+    /// Returns coordinates in viewport space (Y-down, top-left origin) in PDF
+    /// points, like [`Self::image_bounds`].
+    pub fn glyph_like_path_bounds(&self) -> Vec<ImageBounds> {
+        let page_height = self.height();
+        let obj_count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
+        let mut results = Vec::new();
+
+        for i in 0..obj_count {
+            let obj = unsafe { ffi!(FPDFPage_GetObject(self.handle, i)) };
+            if obj.is_null() {
+                continue;
+            }
+            collect_glyph_like_paths(obj, page_height, 0, &mut results);
+        }
+
+        results
+    }
+
     /// Get the rendered bitmap of a specific embedded image object by index.
     /// The index corresponds to the order from iterating page objects (image objects only).
     pub fn render_image_object(&self, image_obj_index: usize) -> Result<Bitmap<'lib>, PdfiumError> {
@@ -250,6 +284,117 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
 
         Err(PdfiumError::OperationFailed)
     }
+}
+
+/// Walk a page object (recursing into Form XObjects) and collect bounds of
+/// glyph-outline-like path objects. See [`Page::glyph_like_path_bounds`].
+fn collect_glyph_like_paths(
+    obj: pdfium_sys::FPDF_PAGEOBJECT,
+    page_height: f32,
+    depth: usize,
+    results: &mut Vec<ImageBounds>,
+) {
+    // Flattened text is usually at the top level or one Form XObject deep;
+    // a small cap keeps malicious/degenerate PDFs from causing deep recursion.
+    const MAX_FORM_DEPTH: usize = 2;
+    // Letterforms are predominantly Bézier curves. A rounded rectangle has 4;
+    // even a single lowercase glyph outline typically carries 6+.
+    const MIN_BEZIER_SEGMENTS: usize = 6;
+    const MIN_TOTAL_SEGMENTS: usize = 10;
+    // Some producers flatten the curves themselves, emitting glyph outlines as
+    // hundreds of tiny line segments with zero Béziers. Those paths are still
+    // recognizable by their extreme segment *density*: a line-flattened text
+    // run carries ~0.3-0.5 segments per pt² of its bounds, while filled
+    // decorations (table rules, shaded rows, sawtooth borders) sit well under
+    // ~0.05. Both thresholds must hold so small busy specks don't qualify.
+    const MIN_FLATTENED_SEGMENTS: usize = 64;
+    const MIN_SEGMENT_DENSITY: f32 = 0.15; // segments per pt² of bbox
+    // Text-sized bounds: at least a couple of points each way (skips specks
+    // and hairline rules), no taller than a stacked paragraph block.
+    const MIN_DIM_PT: f32 = 2.0;
+    const MAX_HEIGHT_PT: f32 = 120.0;
+
+    let obj_type = unsafe { ffi!(FPDFPageObj_GetType(obj)) };
+
+    if obj_type == pdfium_sys::FPDF_PAGEOBJ_FORM as i32 {
+        if depth >= MAX_FORM_DEPTH {
+            return;
+        }
+        let count = unsafe { ffi!(FPDFFormObj_CountObjects(obj)) };
+        for i in 0..count {
+            let child = unsafe { ffi!(FPDFFormObj_GetObject(obj, i as std::os::raw::c_ulong)) };
+            if child.is_null() {
+                continue;
+            }
+            collect_glyph_like_paths(child, page_height, depth + 1, results);
+        }
+        return;
+    }
+
+    if obj_type != pdfium_sys::FPDF_PAGEOBJ_PATH as i32 {
+        return;
+    }
+
+    // Must be filled: glyph outlines are filled shapes. Stroked-only paths
+    // (table rules, underlines, chart lines, borders) are never letterforms.
+    let mut fillmode: std::os::raw::c_int = 0;
+    let mut stroke: pdfium_sys::FPDF_BOOL = 0;
+    let ok = unsafe { ffi!(FPDFPath_GetDrawMode(obj, &mut fillmode, &mut stroke)) };
+    if ok == 0 || fillmode == pdfium_sys::FPDF_FILLMODE_NONE as i32 {
+        return;
+    }
+
+    let seg_count = unsafe { ffi!(FPDFPath_CountSegments(obj)) };
+    if seg_count < MIN_TOTAL_SEGMENTS as i32 {
+        return;
+    }
+    let mut beziers = 0usize;
+    for i in 0..seg_count {
+        let seg = unsafe { ffi!(FPDFPath_GetPathSegment(obj, i)) };
+        if seg.is_null() {
+            continue;
+        }
+        let seg_type = unsafe { ffi!(FPDFPathSegment_GetType(seg)) };
+        if seg_type == pdfium_sys::FPDF_SEGMENT_BEZIERTO as i32 {
+            beziers += 1;
+        }
+    }
+
+    let mut left: f32 = 0.0;
+    let mut bottom: f32 = 0.0;
+    let mut right: f32 = 0.0;
+    let mut top: f32 = 0.0;
+    let ok = unsafe { ffi!(FPDFPageObj_GetBounds(obj, &mut left, &mut bottom, &mut right, &mut top)) };
+    if ok == 0 {
+        return;
+    }
+
+    let w = right - left;
+    let h = top - bottom;
+    if w < MIN_DIM_PT || h < MIN_DIM_PT || h > MAX_HEIGHT_PT {
+        return;
+    }
+
+    // Two glyph-outline profiles:
+    // (a) curve-preserving producers: Bézier-heavy paths;
+    // (b) curve-flattening producers: zero Béziers, but an extreme density of
+    //     tiny line segments packed into a text-sized box.
+    let area = w * h;
+    let bezier_like = beziers >= MIN_BEZIER_SEGMENTS;
+    let flattened_like = seg_count as usize >= MIN_FLATTENED_SEGMENTS
+        && area > 0.0
+        && seg_count as f32 / area >= MIN_SEGMENT_DENSITY;
+    if !bezier_like && !flattened_like {
+        return;
+    }
+
+    // Convert from PDF coords (bottom-left origin) to viewport (top-left origin).
+    results.push(ImageBounds {
+        x: left,
+        y: page_height - top,
+        width: w,
+        height: h,
+    });
 }
 
 /// Pre-computed affine transform from PDF page space to viewport space.

@@ -225,3 +225,120 @@ async fn test_concurrent_parse_does_not_crash() {
     // 16 tasks × 1 page each
     assert_eq!(total, 16);
 }
+
+// -- Vector-glyph (flattened) text detection, issue #291 case 2 --
+//
+// Both fixtures are dense native-text pages where some body lines are drawn
+// as filled vector outlines instead of real text. They cover the two
+// flattening profiles seen in the wild:
+// - `vector_glyph_text_bezier.pdf`: one Bézier-outline path per glyph,
+// - `vector_glyph_text_flattened.pdf`: a whole line as a single path made of
+//   ~1800 straight line segments (curves pre-flattened, zero Béziers).
+
+/// The detector must find glyph-like paths in both fixtures and stay quiet on
+/// a normal native-text PDF. Runs without OCR, so it's fast.
+#[test]
+#[serial]
+fn test_glyph_like_path_bounds_detects_both_flattening_profiles() {
+    let lib = pdfium::Library::init();
+
+    for fixture in [
+        "../../integration_tests_data/vector_glyph_text_bezier.pdf",
+        "../../integration_tests_data/vector_glyph_text_flattened.pdf",
+    ] {
+        let doc = lib.load_document(fixture, None).expect("fixture loads");
+        let page = doc.page(0).expect("page 0 exists");
+        let bounds = page.glyph_like_path_bounds();
+        let area: f32 = bounds.iter().map(|b| b.width * b.height).sum();
+        assert!(
+            !bounds.is_empty(),
+            "{fixture}: expected glyph-like paths, found none"
+        );
+        assert!(
+            area > 1000.0,
+            "{fixture}: glyph-like path area too small: {area} pt²"
+        );
+    }
+
+    // Negative control: a normal native-text PDF has no flattened text, so
+    // detected area must stay below the OCR gate's threshold (0.3% of page).
+    let doc = lib
+        .load_document("../../integration_tests_data/sample.pdf", None)
+        .expect("sample loads");
+    let page = doc.page(0).expect("page 0 exists");
+    let bounds = page.glyph_like_path_bounds();
+    let area: f32 = bounds.iter().map(|b| b.width * b.height).sum();
+    let page_area = page.width() * page.height();
+    assert!(
+        area / page_area < 0.003,
+        "sample.pdf: unexpected glyph-like path area {area} pt² ({}% of page)",
+        area / page_area * 100.0
+    );
+}
+
+/// End-to-end: a dense page with Bézier-outline flattened lines must trigger
+/// OCR and recover the flattened text (previously silently dropped).
+#[tokio::test]
+#[serial]
+async fn test_parse_recovers_bezier_outlined_text() {
+    let env_var = std::env::var("SKIP_INTEGRATION_TESTS");
+    if let Ok(v) = env_var
+        && v == "yes"
+    {
+        return;
+    }
+    let lit = LiteParse::new(LiteParseConfig {
+        quiet: true,
+        ..LiteParseConfig::default()
+    });
+    let parsed = lit
+        .parse("../../integration_tests_data/vector_glyph_text_bezier.pdf")
+        .await
+        .expect("Should be able to parse");
+    let text: String = parsed.pages[0]
+        .text_items
+        .iter()
+        .map(|i| i.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase();
+    assert!(
+        text.contains("approved subcontractors"),
+        "flattened line 1 not recovered"
+    );
+    assert!(
+        text.contains("confirm that vendor data"),
+        "flattened line 2 not recovered"
+    );
+}
+
+/// End-to-end: same, for the line-segment-flattened profile (zero Béziers).
+#[tokio::test]
+#[serial]
+async fn test_parse_recovers_line_flattened_text() {
+    let env_var = std::env::var("SKIP_INTEGRATION_TESTS");
+    if let Ok(v) = env_var
+        && v == "yes"
+    {
+        return;
+    }
+    let lit = LiteParse::new(LiteParseConfig {
+        quiet: true,
+        ..LiteParseConfig::default()
+    });
+    let parsed = lit
+        .parse("../../integration_tests_data/vector_glyph_text_flattened.pdf")
+        .await
+        .expect("Should be able to parse");
+    let text: String = parsed.pages[0]
+        .text_items
+        .iter()
+        .map(|i| i.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase();
+    assert!(
+        text.contains("service-level guarantee"),
+        "flattened line not recovered"
+    );
+}
