@@ -233,6 +233,15 @@ pub struct PdfiumBindings {
         *mut FPDF_BOOL,
     ) -> FPDF_BOOL,
     pub FPDFFormObj_CountObjects: unsafe extern "C" fn(FPDF_PAGEOBJECT) -> std::os::raw::c_int,
+    pub FPDFPageObj_CountMarks: unsafe extern "C" fn(FPDF_PAGEOBJECT) -> std::os::raw::c_int,
+    pub FPDFPageObj_GetMark:
+        unsafe extern "C" fn(FPDF_PAGEOBJECT, std::os::raw::c_ulong) -> FPDF_PAGEOBJECTMARK,
+    pub FPDFPageObjMark_GetName: unsafe extern "C" fn(
+        FPDF_PAGEOBJECTMARK,
+        *mut FPDF_WCHAR,
+        std::os::raw::c_ulong,
+        *mut std::os::raw::c_ulong,
+    ) -> FPDF_BOOL,
     pub FPDFFormObj_GetObject:
         unsafe extern "C" fn(FPDF_PAGEOBJECT, std::os::raw::c_ulong) -> FPDF_PAGEOBJECT,
     pub FPDFPath_CountSegments: unsafe extern "C" fn(FPDF_PAGEOBJECT) -> std::os::raw::c_int,
@@ -673,6 +682,9 @@ impl PdfiumBindings {
             FPDFPageObj_GetStrokeWidth: load_fn!(lib, "FPDFPageObj_GetStrokeWidth"),
             FPDFPath_GetDrawMode: load_fn!(lib, "FPDFPath_GetDrawMode"),
             FPDFFormObj_CountObjects: load_fn!(lib, "FPDFFormObj_CountObjects"),
+            FPDFPageObj_CountMarks: load_fn!(lib, "FPDFPageObj_CountMarks"),
+            FPDFPageObj_GetMark: load_fn!(lib, "FPDFPageObj_GetMark"),
+            FPDFPageObjMark_GetName: load_fn!(lib, "FPDFPageObjMark_GetName"),
             FPDFFormObj_GetObject: load_fn!(lib, "FPDFFormObj_GetObject"),
             FPDFPath_CountSegments: load_fn!(lib, "FPDFPath_CountSegments"),
             FPDFPath_GetPathSegment: load_fn!(lib, "FPDFPath_GetPathSegment"),

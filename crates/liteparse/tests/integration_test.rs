@@ -1868,3 +1868,72 @@ async fn test_screenshot_keeps_lifted_appearances_where_pdfium_draws_them() {
         }
     }
 }
+
+/// PDFium's on-screen render ignores the Invisible flag, which per the spec
+/// applies only to annotation types a viewer does not recognize. A Stamp
+/// flagged Invisible|Print is painted above an earlier widget, so lifting
+/// must treat it as shown, or the widget overlay covers it.
+#[tokio::test]
+#[serial]
+async fn test_screenshot_lifts_invisible_flagged_annotations_above_widgets() {
+    let annots = [
+        GREY_WIDGET,
+        (
+            "/Subtype /Stamp /F 5 /Rect [120 60 200 140]",
+            Some("1 0 0 rg 0 0 80 80 re f"),
+        ),
+    ];
+    for render_form_fields in [false, true] {
+        let image = screenshot_rgb(annotated_page_pdf(0, &annots, &[]), render_form_fields).await;
+        let [r, g, b] = pixel_at(&image, 140.0, 100.0);
+        assert!(
+            r > 200 && g < 80 && b < 80,
+            "an Invisible-flagged stamp stays above the widget (render_form_fields={render_form_fields})"
+        );
+    }
+}
+
+/// The overlay is drawn from a one-page copy, which cannot carry the
+/// catalog's `/OCProperties`, so content on a layer that is off by default
+/// would show in it. A stamp above a widget draws on such a layer: the
+/// screenshot must keep it hidden, as viewers and the plain render do.
+#[tokio::test]
+#[serial]
+async fn test_screenshot_keeps_hidden_layers_hidden_above_widgets() {
+    let stream = |dict: &str, content: &str| {
+        format!(
+            "<< {dict} /Length {} >>\nstream\n{content}\nendstream",
+            content.len()
+        )
+        .into_bytes()
+    };
+    let objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [4 0 R] /D << /BaseState /ON /OFF [4 0 R] >> >> >>"
+            .to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 5 0 R /Annots [7 0 R 9 0 R] >>"
+            .to_vec(),
+        b"<< /Type /OCG /Name (off by default) >>".to_vec(),
+        stream("", "0 0 1 rg 0 0 300 200 re f"),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 80 80]",
+            "0.8 g 0 0 80 80 re f",
+        ),
+        b"<< /Type /Annot /Subtype /Widget /FT /Sig /T (sig) /F 4 /Rect [20 20 100 100] /AP << /N 6 0 R >> >>"
+            .to_vec(),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 80 80] /Resources << /Properties << /Layer 4 0 R >> >>",
+            "/OC /Layer BDC 1 0 0 rg 0 0 80 80 re f EMC",
+        ),
+        b"<< /Type /Annot /Subtype /Stamp /F 4 /Rect [60 60 140 140] /AP << /N 8 0 R >> >>"
+            .to_vec(),
+    ];
+    for render_form_fields in [false, true] {
+        let image = screenshot_rgb(write_pdf(&objects), render_form_fields).await;
+        let [r, g, b] = pixel_at(&image, 120.0, 120.0);
+        assert!(
+            b > 200 && r < 80 && g < 80,
+            "a stamp on a hidden layer stays hidden (render_form_fields={render_form_fields}): got [{r}, {g}, {b}]"
+        );
+    }
+}

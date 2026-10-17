@@ -90,13 +90,19 @@ pub(crate) fn render_document_pages(
             // then paint them over every annotation. Annotations above them are
             // chosen after, once PDFium has written the appearances it
             // generates. A page without such widgets renders as before.
-            let widgets = page.unpainted_widget_indices(form.as_ref());
+            let mut widgets = page.unpainted_widget_indices(form.as_ref());
             let _widgets_loaded = form
                 .as_ref()
                 .or(appearance_form.as_ref())
                 .filter(|_| !widgets.is_empty())
                 .map(|form| page.load_form_widgets(form));
-            let above = page.annotations_above(&widgets);
+            let mut above = page.annotations_above(&widgets);
+            if page.annotations_use_optional_content(&[widgets.as_slice(), &above].concat()) {
+                // The overlay copy loses the catalog's layer states and would
+                // show layers that are off: render the page as PDFium does.
+                widgets.clear();
+                above.clear();
+            }
             // The widgets are hidden too: once adopted, the form layer would
             // paint them a second time under the overlay.
             let mut overlay = [widgets.as_slice(), &above].concat();

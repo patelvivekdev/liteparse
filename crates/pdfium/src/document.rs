@@ -342,9 +342,13 @@ impl<'lib> Document<'lib> {
                 return None;
             }
             let flags = unsafe { ffi!(FPDFAnnot_GetFlags(annot)) };
-            let suppressed = (pdfium_sys::FPDF_ANNOT_FLAG_INVISIBLE
-                | pdfium_sys::FPDF_ANNOT_FLAG_HIDDEN
-                | pdfium_sys::FPDF_ANNOT_FLAG_NOVIEW) as i32;
+            // Each mode keeps what PDFium itself would draw: flattening for
+            // display also drops Invisible annotations, the render does not.
+            let suppressed = if flatten {
+                crate::page::SCREEN_HIDDEN | pdfium_sys::FPDF_ANNOT_FLAG_INVISIBLE as i32
+            } else {
+                crate::page::SCREEN_HIDDEN
+            };
             let is_widget = unsafe { ffi!(FPDFAnnot_GetSubtype(annot)) }
                 == pdfium_sys::FPDF_ANNOT_WIDGET as i32;
             let ok = if !keep(annot_index, is_widget, flags & suppressed == 0) {

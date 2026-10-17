@@ -1207,6 +1207,29 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             .collect()
     }
 
+    /// Whether any annotation at `indices` draws optional content (a layer)
+    /// in its appearance, descending into nested form XObjects.
+    ///
+    /// Layer visibility lives in the catalog's `/OCProperties`, which a page
+    /// imported into another document leaves behind, so an overlay copy would
+    /// show layers that are off. Only `/OC` marked content is seen; a form
+    /// XObject's own `/OC` entry is not exposed by PDFium's API.
+    pub fn annotations_use_optional_content(&self, indices: &[i32]) -> bool {
+        indices.iter().any(|&index| {
+            let annot = unsafe { ffi!(FPDFPage_GetAnnot(self.handle, index)) };
+            if annot.is_null() {
+                return false;
+            }
+            let object_count = unsafe { ffi!(FPDFAnnot_GetObjectCount(annot)) };
+            let uses = (0..object_count).any(|object_index| {
+                let object = unsafe { ffi!(FPDFAnnot_GetObject(annot, object_index)) };
+                !object.is_null() && object_uses_optional_content(object, 0)
+            });
+            unsafe { ffi!(FPDFPage_CloseAnnot(annot)) };
+            uses
+        })
+    }
+
     /// Set the Hidden flag on the annotations at `indices` until the returned
     /// guard drops, which restores their original flags. `None` (nothing
     /// changed) when the pdfium build lacks `FPDFAnnot_SetFlags` or a flag
@@ -1561,10 +1584,11 @@ impl FlattenApi {
     }
 }
 
-/// Annotation flags that keep an annotation off the screen.
-const SCREEN_HIDDEN: i32 = (pdfium_sys::FPDF_ANNOT_FLAG_INVISIBLE
-    | pdfium_sys::FPDF_ANNOT_FLAG_HIDDEN
-    | pdfium_sys::FPDF_ANNOT_FLAG_NOVIEW) as i32;
+/// Annotation flags that keep an annotation off the screen, as PDFium's
+/// render reads them. Invisible is not one: it applies only to annotation
+/// types a viewer does not recognize, and PDFium paints regardless.
+pub(crate) const SCREEN_HIDDEN: i32 =
+    (pdfium_sys::FPDF_ANNOT_FLAG_HIDDEN | pdfium_sys::FPDF_ANNOT_FLAG_NOVIEW) as i32;
 
 /// Whether the annotation's appearance paints text at its top level.
 ///
@@ -1626,6 +1650,42 @@ fn object_paints_text(object: pdfium_sys::FPDF_PAGEOBJECT, depth: u32) -> bool {
         }
         _ => false,
     }
+}
+
+/// Depth-bounded search for an object inside `/OC` marked content,
+/// following form XObjects.
+fn object_uses_optional_content(object: pdfium_sys::FPDF_PAGEOBJECT, depth: u32) -> bool {
+    const MAX_DEPTH: u32 = 8;
+    let marks = unsafe { ffi!(FPDFPageObj_CountMarks(object)) };
+    let marked = (0..marks).any(|index| {
+        let mark = unsafe { ffi!(FPDFPageObj_GetMark(object, index as std::os::raw::c_ulong)) };
+        // "OC" and its NUL: 6 bytes of UTF-16LE.
+        let mut name = [0u16; 3];
+        let mut needed: std::os::raw::c_ulong = 0;
+        !mark.is_null()
+            && unsafe {
+                ffi!(FPDFPageObjMark_GetName(
+                    mark,
+                    name.as_mut_ptr(),
+                    std::mem::size_of_val(&name) as std::os::raw::c_ulong,
+                    &mut needed
+                ))
+            } != 0
+            && needed as usize == std::mem::size_of_val(&name)
+            && name == [u16::from(b'O'), u16::from(b'C'), 0]
+    });
+    marked
+        || unsafe { ffi!(FPDFPageObj_GetType(object)) } == pdfium_sys::FPDF_PAGEOBJ_FORM as i32
+            && depth < MAX_DEPTH
+            && (0..unsafe { ffi!(FPDFFormObj_CountObjects(object)) }).any(|index| {
+                let child = unsafe {
+                    ffi!(FPDFFormObj_GetObject(
+                        object,
+                        index as std::os::raw::c_ulong
+                    ))
+                };
+                !child.is_null() && object_uses_optional_content(child, depth + 1)
+            })
 }
 
 /// Restores the flags [`Page::hide_annotations`] changed when dropped.
