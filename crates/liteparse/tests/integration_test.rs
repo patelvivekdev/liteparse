@@ -1893,13 +1893,10 @@ async fn test_screenshot_lifts_invisible_flagged_annotations_above_widgets() {
     }
 }
 
-/// The overlay is drawn from a one-page copy, which cannot carry the
-/// catalog's `/OCProperties`, so content on a layer that is off by default
-/// would show in it. A stamp above a widget draws on such a layer: the
-/// screenshot must keep it hidden, as viewers and the plain render do.
-#[tokio::test]
-#[serial]
-async fn test_screenshot_keeps_hidden_layers_hidden_above_widgets() {
+/// A 300x200pt page painted blue, with an opaque light-grey signature widget
+/// no `/AcroForm` lists at [20 20 100 100], then a red stamp at `stamp_rect`
+/// drawn in `/OC` marked content on a layer that is off by default.
+fn layered_stamp_pdf(stamp_rect: &str) -> Vec<u8> {
     let stream = |dict: &str, content: &str| {
         format!(
             "<< {dict} /Length {} >>\nstream\n{content}\nendstream",
@@ -1925,15 +1922,46 @@ async fn test_screenshot_keeps_hidden_layers_hidden_above_widgets() {
             "/Type /XObject /Subtype /Form /BBox [0 0 80 80] /Resources << /Properties << /Layer 4 0 R >> >>",
             "/OC /Layer BDC 1 0 0 rg 0 0 80 80 re f EMC",
         ),
-        b"<< /Type /Annot /Subtype /Stamp /F 4 /Rect [60 60 140 140] /AP << /N 8 0 R >> >>"
-            .to_vec(),
+        format!("<< /Type /Annot /Subtype /Stamp /F 4 /Rect [{stamp_rect}] /AP << /N 8 0 R >> >>")
+            .into_bytes(),
     ];
+    write_pdf(&objects)
+}
+
+/// The overlay is drawn from a one-page copy, which cannot carry the
+/// catalog's `/OCProperties`, so content on a layer that is off by default
+/// would show in it. A stamp above a widget draws on such a layer: the
+/// screenshot must keep it hidden, as viewers and the plain render do.
+#[tokio::test]
+#[serial]
+async fn test_screenshot_keeps_hidden_layers_hidden_above_widgets() {
     for render_form_fields in [false, true] {
-        let image = screenshot_rgb(write_pdf(&objects), render_form_fields).await;
+        let image = screenshot_rgb(layered_stamp_pdf("60 60 140 140"), render_form_fields).await;
         let [r, g, b] = pixel_at(&image, 120.0, 120.0);
         assert!(
             b > 200 && r < 80 && g < 80,
             "a stamp on a hidden layer stays hidden (render_form_fields={render_form_fields}): got [{r}, {g}, {b}]"
+        );
+    }
+}
+
+/// A layered stamp elsewhere on the page must not cost an unrelated widget
+/// its overlay: the widget is still painted, and the stamp still hidden.
+#[tokio::test]
+#[serial]
+async fn test_screenshot_paints_widgets_beside_layered_annotations() {
+    for render_form_fields in [false, true] {
+        let image = screenshot_rgb(layered_stamp_pdf("200 100 280 180"), render_form_fields).await;
+        let case = format!("render_form_fields={render_form_fields}");
+        let [r, g, b] = pixel_at(&image, 60.0, 60.0);
+        assert!(
+            r > 180 && r == g && g == b,
+            "the widget beside a layered stamp is painted ({case}): got [{r}, {g}, {b}]"
+        );
+        let [r, g, b] = pixel_at(&image, 240.0, 140.0);
+        assert!(
+            b > 200 && r < 80 && g < 80,
+            "the layered stamp stays hidden ({case}): got [{r}, {g}, {b}]"
         );
     }
 }

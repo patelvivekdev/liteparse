@@ -1207,27 +1207,66 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             .collect()
     }
 
-    /// Whether any annotation at `indices` draws optional content (a layer)
-    /// in its appearance, descending into nested form XObjects.
+    /// The annotations at `indices` that draw optional content (a layer) in
+    /// their appearance, descending into nested form XObjects.
     ///
     /// Layer visibility lives in the catalog's `/OCProperties`, which a page
     /// imported into another document leaves behind, so an overlay copy would
     /// show layers that are off. Only `/OC` marked content is seen; a form
-    /// XObject's own `/OC` entry is not exposed by PDFium's API.
-    pub fn annotations_use_optional_content(&self, indices: &[i32]) -> bool {
-        indices.iter().any(|&index| {
+    /// XObject's own `/OC` entry is not exposed by PDFium's API. An
+    /// annotation's own `/OC` entry needs no check: PDFium's render ignores it
+    /// in the source document too.
+    pub fn optional_content_annotations(&self, indices: &[i32]) -> Vec<i32> {
+        indices
+            .iter()
+            .copied()
+            .filter(|&index| {
+                let annot = unsafe { ffi!(FPDFPage_GetAnnot(self.handle, index)) };
+                if annot.is_null() {
+                    return false;
+                }
+                let object_count = unsafe { ffi!(FPDFAnnot_GetObjectCount(annot)) };
+                let uses = (0..object_count).any(|object_index| {
+                    let object = unsafe { ffi!(FPDFAnnot_GetObject(annot, object_index)) };
+                    !object.is_null() && object_uses_optional_content(object, 0)
+                });
+                unsafe { ffi!(FPDFPage_CloseAnnot(annot)) };
+                uses
+            })
+            .collect()
+    }
+
+    /// Whether the annotations at `a` and `b` may paint over each other: their
+    /// `/Rect`s intersect, or one is `/NoRotate` on a rotated page, where it
+    /// is drawn turned about its corner, outside its `/Rect`. `true` when
+    /// either rect is unavailable.
+    pub fn annotations_overlap(&self, a: i32, b: i32) -> bool {
+        let rotated = self.rotation() != 0;
+        let bounds = |index: i32| {
             let annot = unsafe { ffi!(FPDFPage_GetAnnot(self.handle, index)) };
             if annot.is_null() {
-                return false;
+                return None;
             }
-            let object_count = unsafe { ffi!(FPDFAnnot_GetObjectCount(annot)) };
-            let uses = (0..object_count).any(|object_index| {
-                let object = unsafe { ffi!(FPDFAnnot_GetObject(annot, object_index)) };
-                !object.is_null() && object_uses_optional_content(object, 0)
-            });
+            let mut rect = pdfium_sys::FS_RECTF::default();
+            let found = unsafe { ffi!(FPDFAnnot_GetRect(annot, &mut rect)) } != 0;
+            let turned = rotated
+                && unsafe { ffi!(FPDFAnnot_GetFlags(annot)) }
+                    & pdfium_sys::FPDF_ANNOT_FLAG_NOROTATE as i32
+                    != 0;
             unsafe { ffi!(FPDFPage_CloseAnnot(annot)) };
-            uses
-        })
+            (found && !turned).then(|| {
+                (
+                    rect.left.min(rect.right),
+                    rect.bottom.min(rect.top),
+                    rect.left.max(rect.right),
+                    rect.bottom.max(rect.top),
+                )
+            })
+        };
+        match (bounds(a), bounds(b)) {
+            (Some(a), Some(b)) => a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3,
+            _ => true,
+        }
     }
 
     /// Set the Hidden flag on the annotations at `indices` until the returned

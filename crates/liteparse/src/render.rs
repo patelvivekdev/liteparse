@@ -96,13 +96,35 @@ pub(crate) fn render_document_pages(
                 .or(appearance_form.as_ref())
                 .filter(|_| !widgets.is_empty())
                 .map(|form| page.load_form_widgets(form));
-            let mut above = page.annotations_above(&widgets);
-            if page.annotations_use_optional_content(&[widgets.as_slice(), &above].concat()) {
-                // The overlay copy loses the catalog's layer states and would
-                // show layers that are off: render the page as PDFium does.
-                widgets.clear();
-                above.clear();
+            //
+            // The overlay copy loses the catalog's layer states and would show
+            // layers that are off, so annotations drawing a layer stay in the
+            // base render, under the overlay. Nothing a layered annotation
+            // covers is lifted above it: the widgets up to the last such
+            // annotation are left as PDFium renders them, and the rest keep
+            // their overlay.
+            let layered = page.optional_content_annotations(
+                &[widgets.as_slice(), &page.annotations_above(&widgets)].concat(),
+            );
+            let lifted_above = |widgets: &[i32]| -> Vec<i32> {
+                let mut above = page.annotations_above(widgets);
+                above.retain(|index| !layered.contains(index));
+                above
+            };
+            widgets.retain(|index| !layered.contains(index));
+            let covered = [widgets.as_slice(), &lifted_above(&widgets)]
+                .concat()
+                .into_iter()
+                .filter(|&index| {
+                    layered
+                        .iter()
+                        .any(|&layer| layer > index && page.annotations_overlap(index, layer))
+                })
+                .max();
+            if let Some(covered) = covered {
+                widgets.retain(|&index| index > covered);
             }
+            let above = lifted_above(&widgets);
             // The widgets are hidden too: once adopted, the form layer would
             // paint them a second time under the overlay.
             let mut overlay = [widgets.as_slice(), &above].concat();
