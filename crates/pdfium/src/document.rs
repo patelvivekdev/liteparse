@@ -108,7 +108,8 @@ const RETYPED_WIDGET: &str = "LiteParseOverlay";
 /// The page-editing entry points [`Document::widget_appearance_copy`] and
 /// [`Document::annotation_overlay_copy`] need, resolved together so a build
 /// missing any of them degrades to "no widget text" or "no overlay" rather
-/// than failing the whole pdfium load.
+/// than failing the whole pdfium load. Only the overlay retypes widgets, so
+/// `set_string` alone is optional: without it the widget text still works.
 struct PageEditApi {
     create: unsafe extern "C" fn() -> pdfium_sys::FPDF_DOCUMENT,
     import: unsafe extern "C" fn(
@@ -130,11 +131,13 @@ struct PageEditApi {
         pdfium_sys::FPDF_ANNOTATION,
         std::os::raw::c_int,
     ) -> pdfium_sys::FPDF_BOOL,
-    set_string: unsafe extern "C" fn(
-        pdfium_sys::FPDF_ANNOTATION,
-        pdfium_sys::FPDF_BYTESTRING,
-        pdfium_sys::FPDF_WIDESTRING,
-    ) -> pdfium_sys::FPDF_BOOL,
+    set_string: Option<
+        unsafe extern "C" fn(
+            pdfium_sys::FPDF_ANNOTATION,
+            pdfium_sys::FPDF_BYTESTRING,
+            pdfium_sys::FPDF_WIDESTRING,
+        ) -> pdfium_sys::FPDF_BOOL,
+    >,
 }
 
 impl PageEditApi {
@@ -149,7 +152,7 @@ impl PageEditApi {
             generate_content: bindings.FPDFPage_GenerateContent?,
             flatten: bindings.FPDFPage_Flatten?,
             set_flags: bindings.FPDFAnnot_SetFlags?,
-            set_string: bindings.FPDFAnnot_SetStringValue?,
+            set_string: bindings.FPDFAnnot_SetStringValue,
         })
     }
 
@@ -163,7 +166,7 @@ impl PageEditApi {
             generate_content: pdfium_sys::FPDFPage_GenerateContent,
             flatten: pdfium_sys::FPDFPage_Flatten,
             set_flags: pdfium_sys::FPDFAnnot_SetFlags,
-            set_string: pdfium_sys::FPDFAnnot_SetStringValue,
+            set_string: Some(pdfium_sys::FPDFAnnot_SetStringValue),
         })
     }
 }
@@ -314,6 +317,7 @@ impl<'lib> Document<'lib> {
         keep: impl Fn(i32, bool, bool) -> bool,
     ) -> Option<Document<'lib>> {
         let api = PageEditApi::load()?;
+        let set_string = if flatten { None } else { Some(api.set_string?) };
         let handle = unsafe { (api.create)() };
         if handle.is_null() {
             return None;
@@ -354,10 +358,10 @@ impl<'lib> Document<'lib> {
             let ok = if !keep(annot_index, is_widget, flags & suppressed == 0) {
                 let hidden = flags | pdfium_sys::FPDF_ANNOT_FLAG_HIDDEN as i32;
                 unsafe { (api.set_flags)(annot, hidden) != 0 }
-            } else if is_widget && !flatten {
+            } else if let Some(set_string) = set_string.filter(|_| is_widget) {
                 // `CPDF_AnnotList` skips widgets unless the form layer draws;
                 // under any other subtype their appearance draws as is.
-                unsafe { (api.set_string)(annot, c"Subtype".as_ptr(), retyped.as_ptr()) != 0 }
+                unsafe { set_string(annot, c"Subtype".as_ptr(), retyped.as_ptr()) != 0 }
             } else {
                 true
             };
