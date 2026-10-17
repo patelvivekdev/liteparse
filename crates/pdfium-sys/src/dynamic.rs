@@ -458,6 +458,9 @@ pub struct PdfiumBindings {
     pub FPDFAnnot_GetFlags: unsafe extern "C" fn(FPDF_ANNOTATION) -> std::os::raw::c_int,
     pub FPDFAnnot_SetFlags:
         Option<unsafe extern "C" fn(FPDF_ANNOTATION, std::os::raw::c_int) -> FPDF_BOOL>,
+    pub FPDFAnnot_SetStringValue: Option<
+        unsafe extern "C" fn(FPDF_ANNOTATION, FPDF_BYTESTRING, FPDF_WIDESTRING) -> FPDF_BOOL,
+    >,
     pub FPDFAnnot_GetObjectCount: unsafe extern "C" fn(FPDF_ANNOTATION) -> std::os::raw::c_int,
     pub FPDFAnnot_GetObject:
         unsafe extern "C" fn(FPDF_ANNOTATION, std::os::raw::c_int) -> FPDF_PAGEOBJECT,
@@ -754,6 +757,7 @@ impl PdfiumBindings {
             FPDFAnnot_GetObjNum: load_fn!(lib, "FPDFAnnot_GetObjNum"),
             FPDFAnnot_GetFlags: load_fn!(lib, "FPDFAnnot_GetFlags"),
             FPDFAnnot_SetFlags: load_fn_opt!(lib, "FPDFAnnot_SetFlags"),
+            FPDFAnnot_SetStringValue: load_fn_opt!(lib, "FPDFAnnot_SetStringValue"),
             FPDFAnnot_GetObjectCount: load_fn!(lib, "FPDFAnnot_GetObjectCount"),
             FPDFAnnot_GetObject: load_fn!(lib, "FPDFAnnot_GetObject"),
             FPDFAnnot_GetFormFieldFlags: load_fn!(lib, "FPDFAnnot_GetFormFieldFlags"),
