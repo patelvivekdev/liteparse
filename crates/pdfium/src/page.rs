@@ -454,7 +454,24 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
         form: Option<&FormEnvironment>,
     ) -> Result<Bitmap<'lib>, PdfiumError> {
         let _form_page = form.map(|form| self.notify_form_page_loaded(form));
-        self.render_bitmap(dpi, form)
+        self.render_bitmap(
+            dpi,
+            form,
+            (pdfium_sys::FPDF_ANNOT | pdfium_sys::FPDF_PRINTING) as i32,
+        )
+    }
+
+    /// Like [`Self::render_with_form`], but the page as a viewer shows it on
+    /// screen rather than as printed: annotations without the Print flag are
+    /// drawn and Hidden/NoView ones are not, which is what Poppler and MuPDF
+    /// render too.
+    pub fn render_on_screen(
+        &self,
+        dpi: f32,
+        form: Option<&FormEnvironment>,
+    ) -> Result<Bitmap<'lib>, PdfiumError> {
+        let _form_page = form.map(|form| self.notify_form_page_loaded(form));
+        self.render_bitmap(dpi, form, pdfium_sys::FPDF_ANNOT as i32)
     }
 
     /// Tell the form-fill environment this page is open: `FORM_OnAfterLoadPage`
@@ -488,6 +505,7 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
         &self,
         dpi: f32,
         form: Option<&FormEnvironment>,
+        flags: i32,
     ) -> Result<Bitmap<'lib>, PdfiumError> {
         // `/UserUnit` scales the physical page, so honoring the requested
         // DPI means scaling the pixel size by it too — otherwise a UserUnit
@@ -503,8 +521,6 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
 
         // Fill with white (ARGB: 0xFFFFFFFF)
         bitmap.fill_rect(0, 0, width, height, 0xFFFFFFFF);
-
-        let flags = (pdfium_sys::FPDF_ANNOT | pdfium_sys::FPDF_PRINTING) as i32;
 
         unsafe {
             ffi!(FPDF_RenderPageBitmap(

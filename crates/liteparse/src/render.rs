@@ -67,7 +67,9 @@ pub(crate) fn render_document_pages(
             if long_edge_pt > 0.0 {
                 eff_dpi = eff_dpi.min(MAX_RENDER_LONG_EDGE_PX * 72.0 / long_edge_pt);
             }
-            let bitmap = page.render_with_form(eff_dpi, form.as_ref())?;
+            // A screenshot shows the page as viewers do on screen; the OCR
+            // raster keeps the print render.
+            let bitmap = page.render_on_screen(eff_dpi, form.as_ref())?;
             let width = bitmap.width() as u32;
             let height = bitmap.height() as u32;
             let rgba = bitmap.to_rgba();
